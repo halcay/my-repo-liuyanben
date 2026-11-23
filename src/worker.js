@@ -25,11 +25,18 @@ export default {
     if (!env.KV) return json({ error: '未绑定 KV（检查 wrangler.jsonc 的 kv_namespaces）' }, 500);
 
     try {
+      // ---------- 校验管理密钥 ----------
+      if (p === '/api/admin') {
+        if (!env.ADMIN_KEY) return json({ ok: false, error: '服务器未设置 ADMIN_KEY（Worker → 设置 → 变量和机密，类型选“密钥/Secret”）' }, 500);
+        return isAdmin(req, env) ? json({ ok: true }) : json({ ok: false, error: '管理密钥错误' }, 403);
+      }
+
       // ---------- 留言 ----------
       if (p === '/api/messages' && req.method === 'GET') {
         const keys = await listAll(env.KV, 'msg:', 100);
         const msgs = await Promise.all(keys.map(async k => ({ id: k.name, ...(await env.KV.get(k.name, 'json')) })));
-        return json(msgs.filter(m => m.text));
+        const admin = isAdmin(req, env);
+        return json(msgs.filter(m => m.text && (!m.private || admin)));
       }
       if (p === '/api/messages' && req.method === 'POST') {
         const b = await req.json().catch(() => ({}));
@@ -37,7 +44,7 @@ export default {
         const text = String(b.text || '').trim().slice(0, MAX_MSG);
         if (!text) return json({ error: '内容不能为空' }, 400);
         const key = `msg:${revTs()}-${rid()}`;
-        await env.KV.put(key, JSON.stringify({ name, text, time: Date.now() }));
+        await env.KV.put(key, JSON.stringify({ name, text, time: Date.now(), private: !!b.private }));
         return json({ ok: true, id: key });
       }
       if (p.startsWith('/api/messages/') && req.method === 'DELETE') {
