@@ -1,0 +1,177 @@
+<!doctype html>
+<html lang="zh">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>留言与文件</title>
+<style>
+  :root{--bg:#f4f6fb;--card:#fff;--fg:#1f2937;--mute:#6b7280;--line:#e5e7eb;--pri:#2563eb;--red:#dc2626}
+  @media (prefers-color-scheme:dark){:root{--bg:#0f172a;--card:#1e293b;--fg:#e2e8f0;--mute:#94a3b8;--line:#334155;--pri:#60a5fa;--red:#f87171}}
+  *{box-sizing:border-box}
+  body{margin:0;font-family:system-ui,"Microsoft YaHei",sans-serif;background:var(--bg);color:var(--fg)}
+  header{max-width:860px;margin:0 auto;padding:24px 16px 0;display:flex;align-items:center;gap:12px;flex-wrap:wrap}
+  header h1{margin:0;font-size:24px;flex:1}
+  header a{color:var(--pri);font-size:14px}
+  .tabs{max-width:860px;margin:16px auto 0;padding:0 16px;display:flex;gap:8px}
+  .tabs button{padding:8px 18px;border:1px solid var(--line);background:var(--card);color:var(--fg);border-radius:8px 8px 0 0;cursor:pointer;font-size:15px}
+  .tabs button.on{background:var(--pri);color:#fff;border-color:var(--pri)}
+  main{max-width:860px;margin:0 auto;padding:0 16px 40px}
+  .card{background:var(--card);border:1px solid var(--line);border-radius:0 10px 10px 10px;padding:18px}
+  input,textarea{width:100%;padding:10px;border:1px solid var(--line);border-radius:8px;background:var(--bg);color:var(--fg);font:inherit}
+  textarea{min-height:90px;resize:vertical}
+  .btn{padding:9px 20px;border:0;border-radius:8px;background:var(--pri);color:#fff;font-size:15px;cursor:pointer}
+  .btn:disabled{opacity:.5}
+  .del{border:0;background:none;color:var(--red);cursor:pointer;font-size:13px;display:none}
+  body.admin .del{display:inline}
+  .row{display:flex;gap:10px;margin-bottom:10px}
+  .msg{padding:12px 0;border-bottom:1px solid var(--line)}
+  .msg b{color:var(--pri)} .msg small{color:var(--mute);margin-left:8px}
+  .msg p{margin:6px 0 0;white-space:pre-wrap;word-break:break-word}
+  #drop{border:2px dashed var(--line);border-radius:10px;padding:28px;text-align:center;cursor:pointer;color:var(--mute)}
+  #drop.over{border-color:var(--pri);color:var(--pri)}
+  .file{display:flex;align-items:center;gap:10px;padding:10px 0;border-bottom:1px solid var(--line)}
+  .file a{flex:1;color:var(--fg);word-break:break-all;text-decoration:none}
+  .file a:hover{color:var(--pri)}
+  .file small{color:var(--mute);white-space:nowrap}
+  #status{margin:10px 0;color:var(--mute);font-size:14px;min-height:20px}
+  .empty{color:var(--mute);padding:16px 0;text-align:center}
+</style>
+</head>
+<body>
+<header>
+  <h1>💬 留言与文件</h1>
+  <a href="/">首页</a>
+  <a href="#" id="adminBtn">管理</a>
+</header>
+<div class="tabs">
+  <button data-t="msg" class="on">留言本</button>
+  <button data-t="file">文件</button>
+</div>
+<main>
+  <section id="t-msg" class="card">
+    <div class="row"><input id="name" placeholder="昵称（可空）" maxlength="30" style="max-width:200px"></div>
+    <textarea id="text" placeholder="写点什么…" maxlength="1000"></textarea>
+    <div style="margin-top:10px;display:flex;align-items:center;gap:10px">
+      <button class="btn" id="send">发布留言</button>
+      <label style="font-size:14px;cursor:pointer"><input type="checkbox" id="priv" style="width:auto"> 悄悄话（仅管理员可见）</label>
+      <small style="color:var(--mute)">不勾选 = 公开，所有人可见 · Ctrl+Enter 发送</small>
+    </div>
+    <div id="msgs"></div>
+  </section>
+
+  <section id="t-file" class="card" hidden>
+    <div id="drop">点击或拖拽文件到这里上传（单个最大 20MB）</div>
+    <input id="fi" type="file" multiple hidden>
+    <div id="status"></div>
+    <div id="files"></div>
+  </section>
+</main>
+
+<script>
+const $ = id => document.getElementById(id);
+const esc = s => String(s).replace(/[&<>"]/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));
+const fmtT = t => new Date(t).toLocaleString('zh-CN', { hour12: false });
+const fmtS = n => n < 1024 ? n + ' B' : n < 1048576 ? (n/1024).toFixed(1) + ' KB' : (n/1048576).toFixed(1) + ' MB';
+let adminKey = '';
+try { adminKey = sessionStorage.getItem('adminKey') || ''; } catch (e) {}
+if (adminKey) document.body.classList.add('admin');
+
+async function api(path, opt = {}) {
+  opt.headers = { ...(opt.headers || {}), ...(adminKey ? { 'x-admin-key': adminKey } : {}) };
+  const r = await fetch(path, opt);
+  const j = await r.json().catch(() => ({ error: r.status + ' ' + r.statusText }));
+  if (!r.ok) throw new Error(j.error || r.status);
+  return j;
+}
+
+// 标签切换
+document.querySelectorAll('.tabs button').forEach(b => b.onclick = () => {
+  document.querySelectorAll('.tabs button').forEach(x => x.classList.toggle('on', x === b));
+  $('t-msg').hidden = b.dataset.t !== 'msg';
+  $('t-file').hidden = b.dataset.t !== 'file';
+  location.hash = b.dataset.t;
+});
+if (location.hash === '#file') document.querySelector('[data-t=file]').click();
+
+// 管理模式
+$('adminBtn').onclick = async e => {
+  e.preventDefault();
+  if (adminKey) { adminKey = ''; try { sessionStorage.removeItem('adminKey'); } catch (e) {} document.body.classList.remove('admin'); loadMsgs(); return; }
+  const k = prompt('输入管理密钥（开启删除按钮）');
+  if (!k) return;
+  adminKey = k;
+  try { await api('/api/admin'); }
+  catch (err) { adminKey = ''; alert(err.message); return; }
+  try { sessionStorage.setItem('adminKey', k); } catch (e) {}
+  document.body.classList.add('admin');
+  loadMsgs();
+};
+
+// ---------- 留言 ----------
+try { $('name').value = localStorage.getItem('gbName') || ''; } catch (e) {}
+async function loadMsgs() {
+  try {
+    const list = await api('/api/messages');
+    $('msgs').innerHTML = list.length ? list.map(m => `
+      <div class="msg"><b>${esc(m.name)}</b><small>${fmtT(m.time)}${m.private ? ' · 🔒悄悄话' : ''}</small>
+        <button class="del" data-id="${esc(m.id)}">删除</button><p>${esc(m.text)}</p></div>`).join('')
+      : '<div class="empty">还没有留言，来写第一条吧</div>';
+    $('msgs').querySelectorAll('.del').forEach(b => b.onclick = async () => {
+      if (!confirm('删除这条留言？')) return;
+      try { await api('/api/messages/' + encodeURIComponent(b.dataset.id), { method: 'DELETE' }); loadMsgs(); }
+      catch (e) { alert(e.message); }
+    });
+  } catch (e) { $('msgs').innerHTML = `<div class="empty">加载失败：${esc(e.message)}</div>`; }
+}
+async function send() {
+  const text = $('text').value.trim();
+  if (!text) return $('text').focus();
+  const name = $('name').value.trim();
+  try { localStorage.setItem('gbName', name); } catch (e) {}
+  $('send').disabled = true;
+  try {
+    await api('/api/messages', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ name, text, private: $('priv').checked }) });
+    if ($('priv').checked) alert('悄悄话已发送，只有管理员能看到');
+    $('text').value = ''; $('priv').checked = false; loadMsgs();
+  } catch (e) { alert('发布失败：' + e.message); }
+  $('send').disabled = false;
+}
+$('send').onclick = send;
+$('text').onkeydown = e => { if (e.key === 'Enter' && e.ctrlKey) send(); };
+
+// ---------- 文件 ----------
+async function loadFiles() {
+  try {
+    const list = await api('/api/files');
+    $('files').innerHTML = list.length ? list.map(f => `
+      <div class="file">📄 <a href="/api/files/${f.id}" download>${esc(f.name)}</a>
+        <small>${fmtS(f.size || 0)} · ${fmtT(f.time)}</small>
+        <button class="del" data-id="${f.id}">删除</button></div>`).join('')
+      : '<div class="empty">暂无文件</div>';
+    $('files').querySelectorAll('.del').forEach(b => b.onclick = async () => {
+      if (!confirm('删除这个文件？')) return;
+      try { await api('/api/files/' + b.dataset.id, { method: 'DELETE' }); loadFiles(); }
+      catch (e) { alert(e.message); }
+    });
+  } catch (e) { $('files').innerHTML = `<div class="empty">加载失败：${esc(e.message)}</div>`; }
+}
+async function upload(list) {
+  for (const f of list) {
+    if (f.size > 20 * 1024 * 1024) { $('status').textContent = `✘ ${f.name} 超过 20MB`; continue; }
+    $('status').textContent = `上传中：${f.name} …`;
+    const fd = new FormData(); fd.append('file', f);
+    try { await api('/api/files', { method: 'POST', body: fd }); $('status').textContent = `✔ 已上传 ${f.name}`; }
+    catch (e) { $('status').textContent = `✘ ${f.name}：${e.message}`; }
+  }
+  loadFiles();
+}
+$('drop').onclick = () => $('fi').click();
+$('fi').onchange = e => { upload([...e.target.files]); e.target.value = ''; };
+$('drop').ondragover = e => { e.preventDefault(); $('drop').classList.add('over'); };
+$('drop').ondragleave = () => $('drop').classList.remove('over');
+$('drop').ondrop = e => { e.preventDefault(); $('drop').classList.remove('over'); upload([...e.dataTransfer.files]); };
+
+loadMsgs(); loadFiles();
+</script>
+</body>
+</html>
