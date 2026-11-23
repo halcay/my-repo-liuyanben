@@ -52,7 +52,9 @@
     <div class="row"><input id="name" placeholder="昵称（可空）" maxlength="30" style="max-width:200px"></div>
     <textarea id="text" placeholder="写点什么…" maxlength="1000"></textarea>
     <div style="margin-top:10px;display:flex;align-items:center;gap:10px">
-      <button class="btn" id="send">发布留言</button><small style="color:var(--mute)">Ctrl+Enter 发送</small>
+      <button class="btn" id="send">发布留言</button>
+      <label style="font-size:14px;cursor:pointer"><input type="checkbox" id="priv" style="width:auto"> 悄悄话（仅管理员可见）</label>
+      <small style="color:var(--mute)">不勾选 = 公开，所有人可见 · Ctrl+Enter 发送</small>
     </div>
     <div id="msgs"></div>
   </section>
@@ -92,13 +94,17 @@ document.querySelectorAll('.tabs button').forEach(b => b.onclick = () => {
 if (location.hash === '#file') document.querySelector('[data-t=file]').click();
 
 // 管理模式
-$('adminBtn').onclick = e => {
+$('adminBtn').onclick = async e => {
   e.preventDefault();
-  if (adminKey) { adminKey = ''; try { sessionStorage.removeItem('adminKey'); } catch (e) {} document.body.classList.remove('admin'); return; }
+  if (adminKey) { adminKey = ''; try { sessionStorage.removeItem('adminKey'); } catch (e) {} document.body.classList.remove('admin'); loadMsgs(); return; }
   const k = prompt('输入管理密钥（开启删除按钮）');
   if (!k) return;
-  adminKey = k; try { sessionStorage.setItem('adminKey', k); } catch (e) {}
+  adminKey = k;
+  try { await api('/api/admin'); }
+  catch (err) { adminKey = ''; alert(err.message); return; }
+  try { sessionStorage.setItem('adminKey', k); } catch (e) {}
   document.body.classList.add('admin');
+  loadMsgs();
 };
 
 // ---------- 留言 ----------
@@ -107,7 +113,7 @@ async function loadMsgs() {
   try {
     const list = await api('/api/messages');
     $('msgs').innerHTML = list.length ? list.map(m => `
-      <div class="msg"><b>${esc(m.name)}</b><small>${fmtT(m.time)}</small>
+      <div class="msg"><b>${esc(m.name)}</b><small>${fmtT(m.time)}${m.private ? ' · 🔒悄悄话' : ''}</small>
         <button class="del" data-id="${esc(m.id)}">删除</button><p>${esc(m.text)}</p></div>`).join('')
       : '<div class="empty">还没有留言，来写第一条吧</div>';
     $('msgs').querySelectorAll('.del').forEach(b => b.onclick = async () => {
@@ -124,8 +130,9 @@ async function send() {
   try { localStorage.setItem('gbName', name); } catch (e) {}
   $('send').disabled = true;
   try {
-    await api('/api/messages', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ name, text }) });
-    $('text').value = ''; loadMsgs();
+    await api('/api/messages', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ name, text, private: $('priv').checked }) });
+    if ($('priv').checked) alert('悄悄话已发送，只有管理员能看到');
+    $('text').value = ''; $('priv').checked = false; loadMsgs();
   } catch (e) { alert('发布失败：' + e.message); }
   $('send').disabled = false;
 }
