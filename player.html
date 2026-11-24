@@ -1,0 +1,111 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>视频播放</title>
+<style>
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body {
+    font-family: -apple-system, "PingFang SC", "Microsoft YaHei", sans-serif;
+    background: #111;
+    color: #eee;
+    min-height: 100vh;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    padding: 24px 16px;
+  }
+  h1 { font-size: 20px; font-weight: 600; margin-bottom: 16px; }
+  .wrap { width: 100%; max-width: 960px; }
+  video {
+    width: 100%;
+    background: #000;
+    border-radius: 8px;
+    display: block;
+  }
+  .status { margin-top: 10px; font-size: 13px; color: #999; min-height: 18px; }
+  .status.error { color: #ff6b6b; }
+  .bar { display: flex; gap: 8px; margin-top: 16px; }
+  .bar input {
+    flex: 1;
+    padding: 10px 12px;
+    border-radius: 6px;
+    border: 1px solid #333;
+    background: #1c1c1c;
+    color: #eee;
+    font-size: 14px;
+  }
+  .bar button {
+    padding: 10px 18px;
+    border: none;
+    border-radius: 6px;
+    background: #3b82f6;
+    color: #fff;
+    font-size: 14px;
+    cursor: pointer;
+  }
+  .bar button:hover { background: #2563eb; }
+</style>
+</head>
+<body>
+  <div class="wrap">
+    <h1 id="title">视频播放</h1>
+
+    <video id="player" controls playsinline preload="metadata"></video>
+    <div id="status" class="status"></div>
+
+    <!-- 测试用：粘贴其他视频网址播放。正式上线不需要可以删掉这一段 -->
+    <div class="bar">
+      <input id="urlInput" type="text" placeholder="粘贴视频网址，例如 https://pub-xxxx.r2.dev/video.webm">
+      <button id="loadBtn">播放</button>
+    </div>
+  </div>
+
+<script>
+  // ===== 在这里改成你的视频网址 =====
+  const VIDEO_URL = "https://pub-xxxx.r2.dev/video.webm";
+  const VIDEO_TITLE = "视频播放";
+  // ==================================
+
+  const player = document.getElementById("player");
+  const statusEl = document.getElementById("status");
+  const urlInput = document.getElementById("urlInput");
+  document.getElementById("title").textContent = VIDEO_TITLE;
+  document.title = VIDEO_TITLE;
+
+  function setStatus(text, isError) {
+    statusEl.textContent = text;
+    statusEl.className = "status" + (isError ? " error" : "");
+  }
+
+  function load(url) {
+    if (!url) return;
+    setStatus("加载中…");
+    player.src = url;
+    player.load();
+    urlInput.value = url;
+  }
+
+  player.addEventListener("loadedmetadata", () => setStatus("已就绪，点击播放"));
+  player.addEventListener("waiting", () => setStatus("缓冲中…"));
+  player.addEventListener("playing", () => setStatus(""));
+  player.addEventListener("error", () => {
+    const isWebm = /\.webm(\?|$)/i.test(player.src);
+    const isApple = /iPhone|iPad|Macintosh/.test(navigator.userAgent) && "ontouchend" in document;
+    if (isWebm && isApple) {
+      setStatus("这台设备可能不支持 WebM 格式，请换 MP4 版本或用安卓手机、电脑观看。", true);
+    } else {
+      setStatus("视频加载失败：请检查网址是否正确、R2 是否已开启公开访问。", true);
+    }
+  });
+
+  document.getElementById("loadBtn").addEventListener("click", () => load(urlInput.value.trim()));
+  urlInput.addEventListener("keydown", e => { if (e.key === "Enter") load(urlInput.value.trim()); });
+
+  // 支持网址参数：player.html?v=视频网址
+  const fromQuery = new URLSearchParams(location.search).get("v");
+  load(fromQuery || VIDEO_URL);
+</script>
+</body>
+</html>
