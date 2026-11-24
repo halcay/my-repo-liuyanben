@@ -3,7 +3,8 @@
 //        file:<id>              → 文件二进制，metadata 存 {name,size,type,time}
 // 删除需要请求头 X-Admin-Key 等于密钥 ADMIN_KEY（在 Cloudflare 后台设置）
 
-const MAX_FILE = 20 * 1024 * 1024; // 20MB（KV 单值上限 25MB）
+const MAX_FILE = 20 * 1024 * 1024;    // KV：20MB（KV 单值上限 25MB）
+const MAX_FILE_R2 = 95 * 1024 * 1024; // R2：95MB（Workers 免费版请求体上限 100MB）
 const MAX_MSG = 1000;
 
 const json = (data, status = 200) =>
@@ -54,9 +55,22 @@ export default {
       }
 
       // ---------- 文件 ----------
+      // 绑定了 R2（env.R2）就存 R2，单文件上限 95MB（免费版请求体上限 100MB）；否则退回 KV，上限 20MB
+      const useR2 = !!env.R2;
+      const maxFile = useR2 ? MAX_FILE_R2 : MAX_FILE;
+      if (p === '/api/config' && req.method === 'GET') {
+        return json({ storage: useR2 ? 'R2' : 'KV', maxFile });
+      }
       if (p === '/api/files' && req.method === 'GET') {
-        const keys = await listAll(env.KV, 'file:', 500);
-        const files = keys.map(k => ({ id: k.name.slice(5), ...(k.metadata || {}) }));
+        let files;
+        if (useR2) {
+          const r = await env.R2.list({ limit: 500, include: ['customMetadata'] });
+          files = r.objects.map(o => ({ id: o.key, name: o.customMetadata?.name || o.key, size: o.size,
+            type: o.customMetadata?.type, time: Number(o.customMetadata?.time) || o.uploaded.getTime() }));
+        } else {
+          const keys = await listAll(env.KV, 'file:', 500);
+          files = keys.map(k => ({ id: k.name.slice(5), ...(k.metadata || {}) }));
+        }
         files.sort((a, b) => (b.time || 0) - (a.time || 0));
         return json(files);
       }
@@ -64,25 +78,37 @@ export default {
         const form = await req.formData();
         const f = form.get('file');
         if (!f || typeof f === 'string') return json({ error: '没有文件' }, 400);
-        if (f.size > MAX_FILE) return json({ error: '文件超过 20MB' }, 413);
+        if (f.size > maxFile) return json({ error: `文件超过 ${maxFile / 1048576}MB` }, 413);
         const id = Date.now().toString(36) + rid();
         const meta = { name: f.name.slice(0, 200), size: f.size, type: f.type || 'application/octet-stream', time: Date.now() };
-        await env.KV.put('file:' + id, await f.arrayBuffer(), { metadata: meta });
+        if (useR2) {
+          await env.R2.put(id, f, { httpMetadata: { contentType: meta.type },
+            customMetadata: { name: meta.name, type: meta.type, time: String(meta.time) } });
+        } else {
+          await env.KV.put('file:' + id, await f.arrayBuffer(), { metadata: meta });
+        }
         return json({ ok: true, id, ...meta });
       }
       const m = p.match(/^\/api\/files\/([\w]+)$/);
       if (m && req.method === 'GET') {
-        const { value, metadata } = await env.KV.getWithMetadata('file:' + m[1], 'stream');
-        if (!value) return json({ error: '文件不存在' }, 404);
-        const name = (metadata && metadata.name) || m[1];
-        return new Response(value, { headers: {
-          'content-type': (metadata && metadata.type) || 'application/octet-stream',
-          'content-disposition': `attachment; filename*=UTF-8''${encodeURIComponent(name)}`,
+        let body, name, type;
+        if (useR2) {
+          const o = await env.R2.get(m[1]);
+          if (!o) return json({ error: '文件不存在' }, 404);
+          body = o.body; name = o.customMetadata?.name; type = o.customMetadata?.type;
+        } else {
+          const { value, metadata } = await env.KV.getWithMetadata('file:' + m[1], 'stream');
+          if (!value) return json({ error: '文件不存在' }, 404);
+          body = value; name = metadata?.name; type = metadata?.type;
+        }
+        return new Response(body, { headers: {
+          'content-type': type || 'application/octet-stream',
+          'content-disposition': `attachment; filename*=UTF-8''${encodeURIComponent(name || m[1])}`,
         } });
       }
       if (m && req.method === 'DELETE') {
         if (!isAdmin(req, env)) return json({ error: '管理密钥错误' }, 403);
-        await env.KV.delete('file:' + m[1]);
+        if (useR2) await env.R2.delete(m[1]); else await env.KV.delete('file:' + m[1]);
         return json({ ok: true });
       }
 

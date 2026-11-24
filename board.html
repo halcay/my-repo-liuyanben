@@ -157,7 +157,7 @@ async function loadFiles() {
 }
 async function upload(list) {
   for (const f of list) {
-    if (f.size > 20 * 1024 * 1024) { $('status').textContent = `✘ ${f.name} 超过 20MB`; continue; }
+    if (f.size > maxFile) { $('status').textContent = `✘ ${f.name} 超过 ${maxFile / 1048576}MB`; continue; }
     $('status').textContent = `上传中：${f.name} …`;
     const fd = new FormData(); fd.append('file', f);
     try { await api('/api/files', { method: 'POST', body: fd }); $('status').textContent = `✔ 已上传 ${f.name}`; }
@@ -170,6 +170,13 @@ $('fi').onchange = e => { upload([...e.target.files]); e.target.value = ''; };
 $('drop').ondragover = e => { e.preventDefault(); $('drop').classList.add('over'); };
 $('drop').ondragleave = () => $('drop').classList.remove('over');
 $('drop').ondrop = e => { e.preventDefault(); $('drop').classList.remove('over'); upload([...e.dataTransfer.files]); };
+
+// 读取后端用的存储（R2 或 KV）和单文件上限
+let maxFile = 20 * 1024 * 1024;
+api('/api/config').then(c => {
+  maxFile = c.maxFile;
+  $('drop').textContent = `点击或拖拽文件到这里上传（单个最大 ${maxFile / 1048576}MB，存储：${c.storage}）`;
+}).catch(() => {});
 
 loadMsgs(); loadFiles();
 </script>
