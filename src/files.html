@@ -130,14 +130,14 @@ function kind(f) {
 }
 const icon = k => ({ image: '🖼️', video: '🎬', audio: '🎵', pdf: '📕', text: '📝' }[k] || '📄');
 function preview(f) {
-  const src = `/api/files/${f.id}?view=1`, k = kind(f);
+  const src = `/api/files/${encodeURIComponent(f.id)}?view=1`, k = kind(f);
   const el = k === 'image' ? `<img src="${src}" alt="">`
     : k === 'video' ? `<video src="${src}" controls autoplay playsinline></video>`
     : k === 'audio' ? `<audio src="${src}" controls autoplay></audio>`
     : `<iframe src="${src}"></iframe>`;
   $('pvBody').innerHTML = el;
   $('pvName').textContent = f.name;
-  $('pvDl').href = `/api/files/${f.id}`;
+  $('pvDl').href = `/api/files/${encodeURIComponent(f.id)}`;
   $('pv').hidden = false;
   const v = $('pvBody').querySelector('video');
   if (v) v.onerror = () => { $('pvName').textContent = f.name + '（此设备可能不支持该视频格式，请下载后观看）'; };
@@ -198,15 +198,15 @@ async function loadFiles() {
     const list = await api('/api/files?folder=' + encodeURIComponent(d));
     const head = !d && list.length ? '<div class="sub">未归类的文件</div>' : '';
     $('files').innerHTML = list.length ? head + list.map(f => `
-      <div class="file">${icon(kind(f))} <a href="/api/files/${f.id}" download>${esc(f.name)}</a>
+      <div class="file">${icon(kind(f))} <a href="/api/files/${esc(encodeURIComponent(f.id))}" download>${esc(f.name)}</a>
         <small>${fmtS(f.size || 0)} · ${fmtT(f.time)}</small>
-        ${kind(f) ? `<button class="view" data-id="${f.id}">${kind(f) === 'video' || kind(f) === 'audio' ? '播放' : '查看'}</button>` : ''}
-        <button class="del" data-id="${f.id}">删除</button></div>`).join('')
+        ${kind(f) ? `<button class="view" data-id="${esc(f.id)}">${kind(f) === 'video' || kind(f) === 'audio' ? '播放' : '查看'}</button>` : ''}
+        <button class="del" data-id="${esc(f.id)}">删除</button></div>`).join('')
       : (d ? '<div class="empty">这个文件夹还是空的，把文件拖到上面的框里上传</div>' : '');
     $('files').querySelectorAll('.view').forEach(b => b.onclick = () => preview(list.find(f => f.id === b.dataset.id)));
     $('files').querySelectorAll('.del').forEach(b => b.onclick = async () => {
       if (!confirm('删除这个文件？')) return;
-      try { await api('/api/files/' + b.dataset.id, { method: 'DELETE' }); reload(); }
+      try { await api('/api/files/' + encodeURIComponent(b.dataset.id), { method: 'DELETE' }); reload(); }
       catch (e) { alert(e.message); }
     });
   } catch (e) { $('files').innerHTML = `<div class="empty">加载失败：${esc(e.message)}</div>`; }

@@ -186,7 +186,10 @@ export default {
         if (folder && !(await env.KV.get('dir:' + folder))) await env.KV.put('dir:' + folder, '1');
         return json({ ok: true, id, ...meta });
       }
-      const m = p.match(/^\/api\/files\/([\w]+)$/);
+      // 文件 ID 允许任意 R2 键（例如在 Cloudflare 后台直接上传的 “xxx.webm”、带中文/横杠的名字）
+      const m0 = p.match(/^\/api\/files\/(.+)$/);
+      let m = null;
+      if (m0) { try { m = [m0[0], decodeURIComponent(m0[1])]; } catch (e) { return json({ error: '文件地址错误' }, 400); } }
       if (m && req.method === 'GET') {
         // ?view=1：在浏览器里直接查看/播放；否则下载
         const view = url.searchParams.get('view') === '1';
