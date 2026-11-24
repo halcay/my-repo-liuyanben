@@ -1,0 +1,266 @@
+<!doctype html>
+<html lang="zh">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>GitHub 上传</title>
+<style>
+  body{font-family:system-ui,"Microsoft YaHei",sans-serif;max-width:640px;margin:30px auto;padding:0 16px;background:#f6f8fa;color:#24292f}
+  h2{margin-top:0}
+  label{display:block;margin:10px 0 4px;font-size:14px}
+  input{width:100%;box-sizing:border-box;padding:8px;border:1px solid #d0d7de;border-radius:6px}
+  .row{display:flex;gap:10px}.row>div{flex:1}
+  #drop{margin-top:14px;border:2px dashed #8c959f;border-radius:8px;padding:30px;text-align:center;background:#fff;cursor:pointer}
+  #drop.over{border-color:#2da44e;background:#eaffea}
+  button{margin-top:14px;padding:10px 20px;background:#2da44e;color:#fff;border:0;border-radius:6px;font-size:15px;cursor:pointer}
+  button:disabled{background:#94d3a2}
+  #log{margin-top:14px;background:#fff;border:1px solid #d0d7de;border-radius:6px;padding:10px;font:13px monospace;white-space:pre-wrap;min-height:60px}
+  .ok{color:#1a7f37}.err{color:#cf222e}
+</style>
+</head>
+<body>
+<h2>文件自动上传到 GitHub</h2>
+
+<label>Token（需 repo / Contents 写权限，仅存本浏览器）</label>
+<input id="token" type="password" placeholder="ghp_... 或 github_pat_...">
+<div class="row">
+  <div><label>用户/组织</label><input id="owner" placeholder="halcay"></div>
+  <div><label>仓库</label><input id="repo" placeholder="my-repo"></div>
+</div>
+<div class="row">
+  <div><label>分支</label><input id="branch" value="main"></div>
+  <div><label>目标目录（可空）</label><input id="dir" placeholder="uploads"></div>
+</div>
+<label>提交说明</label>
+<input id="msg" value="upload via web">
+
+<div id="drop">点击选择文件，或拖拽 文件/文件夹 到这里<br>
+  <button id="pickDir" type="button" style="margin:8px 0;padding:4px 12px;font-size:13px;background:#6e7781">选择文件夹</button><br>
+  <small id="sel">未选择</small></div>
+<input id="file" type="file" multiple hidden>
+<input id="dirInput" type="file" webkitdirectory multiple hidden>
+<button id="go">上传</button>
+<button id="ls" style="background:#0969da">刷新文件列表</button>
+<button id="clearDir" style="background:#cf222e">删除当前目录全部文件</button>
+<div id="log"></div>
+<h3 style="margin-top:24px">目标目录中的文件</h3>
+<div id="list" style="background:#fff;border:1px solid #d0d7de;border-radius:6px"></div>
+
+<script src="https://cdnjs.cloudflare.com/ajax/libs/jszip/3.10.1/jszip.min.js"></script>
+<script>
+const $ = id => document.getElementById(id);
+const keys = ['token','owner','repo','branch','dir','msg'];
+keys.forEach(k => { try { const v = localStorage.getItem('gh_'+k); if (v) $(k).value = v; } catch(e){} });
+
+// files: [{ f: File, rel: '相对路径/文件名' }]
+let files = [];
+// 把 .zip 解压成带目录的文件；zip 内若只有一个顶层文件夹，自动去掉这一层
+async function expandZips(arr) {
+  const out = [];
+  for (const x of arr) {
+    if (!/\.zip$/i.test(x.rel) || !confirm(`${x.rel} 是压缩包，解压后按目录结构上传？\n（取消 = 原样上传 zip 文件）`)) { out.push(x); continue; }
+    if (!window.JSZip) { log('✘ 解压组件没加载（需要联网），已原样上传 zip', 'err'); out.push(x); continue; }
+    try {
+      const zip = await JSZip.loadAsync(x.f);
+      const ents = Object.values(zip.files).filter(z => !z.dir && !/(^|\/)(__MACOSX|\.DS_Store)/.test(z.name));
+      const tops = new Set(ents.map(z => z.name.split('/')[0]));
+      const strip = tops.size === 1 && ents.every(z => z.name.includes('/')) ? [...tops][0] + '/' : '';
+      for (const z of ents) out.push({ f: await z.async('blob'), rel: z.name.slice(strip.length) });
+      log(`📦 ${x.rel} 解压出 ${ents.length} 个文件${strip ? `（已去掉外层文件夹 ${strip}）` : ''}`, 'ok');
+    } catch (e) { log(`✘ 解压 ${x.rel} 失败：${e.message}`, 'err'); }
+  }
+  return out;
+}
+const setFiles = async arr => {
+  arr = await expandZips(arr);
+  files = arr.filter(x => !/(^|\/)(\.git|node_modules)(\/|$)/.test(x.rel));
+  $('sel').textContent = files.length ? `${files.length} 个文件：` + files.map(x => x.rel).join(', ') : '未选择';
+};
+$('drop').onclick = () => $('file').click();
+$('pickDir').onclick = e => { e.stopPropagation(); $('dirInput').click(); };
+$('file').onchange = e => setFiles([...e.target.files].map(f => ({ f, rel: f.name })));
+// 选文件夹：保留文件夹名作为第一层
+$('dirInput').onchange = e => setFiles([...e.target.files].map(f => ({ f, rel: f.webkitRelativePath || f.name })));
+$('drop').ondragover = e => { e.preventDefault(); $('drop').classList.add('over'); };
+$('drop').ondragleave = () => $('drop').classList.remove('over');
+
+// 递归读取拖进来的文件夹
+const readEntry = (entry, prefix) => new Promise(res => {
+  if (entry.isFile) entry.file(f => res([{ f, rel: prefix + f.name }]), () => res([]));
+  else if (entry.isDirectory) {
+    const reader = entry.createReader(), all = [];
+    const next = () => reader.readEntries(async ents => {
+      if (!ents.length) {
+        const parts = await Promise.all(all.map(en => readEntry(en, prefix + entry.name + '/')));
+        res(parts.flat());
+      } else { all.push(...ents); next(); }
+    }, () => res([]));
+    next();
+  } else res([]);
+});
+$('drop').ondrop = async e => {
+  e.preventDefault(); $('drop').classList.remove('over');
+  // 必须同步取出，await 之后 dataTransfer 会失效
+  const tops = [], dirs = [];
+  for (const it of [...e.dataTransfer.items]) {
+    if (it.kind !== 'file') continue;
+    const en = it.webkitGetAsEntry && it.webkitGetAsEntry();
+    if (en && en.isDirectory) dirs.push(en);
+    else { const f = it.getAsFile(); if (f) tops.push({ f, rel: f.name }); }
+  }
+  const sub = (await Promise.all(dirs.map(en => readEntry(en, '')))).flat();
+  if (dirs.length && !sub.length)
+    log('⚠ 浏览器没读到拖入的文件夹内容（本地 file:// 打开时 Chrome 会拦截），请改用「选择文件夹」按钮', 'err');
+  setFiles(tops.concat(sub));
+};
+
+const log = (t, c='') => { const s = document.createElement('div'); s.className = c; s.textContent = t; $('log').appendChild(s); };
+
+const toB64 = f => new Promise((res, rej) => {
+  const r = new FileReader();
+  r.onload = () => res(r.result.split(',')[1]);
+  r.onerror = rej;
+  r.readAsDataURL(f);
+});
+
+$('go').onclick = async () => {
+  const c = Object.fromEntries(keys.map(k => [k, $(k).value.trim()]));
+  if (!c.token || !c.owner || !c.repo) return log('请填写 Token、用户、仓库', 'err');
+  if (!files.length) return log('请先选择文件', 'err');
+  keys.forEach(k => { try { localStorage.setItem('gh_'+k, c[k]); } catch(e){} });
+
+  $('go').disabled = true; $('log').innerHTML = '';
+  const H = { Authorization: 'Bearer ' + c.token, Accept: 'application/vnd.github+json' };
+  const dir = c.dir.replace(/^\/+|\/+$/g, '');
+
+  // 所有文件合成一次提交（Cloudflare 只构建一次），同名文件直接覆盖
+  const gh = (p, opt = {}) => fetch(`https://api.github.com/repos/${c.owner}/${c.repo}/git/${p}`, { ...opt, headers: H })
+    .then(async r => { const j = await r.json().catch(() => ({})); if (!r.ok) throw new Error(`${r.status} ${j.message || ''}`); return j; });
+  try {
+    const ref = await gh('ref/heads/' + encodeURIComponent(c.branch));
+    const base = await gh('commits/' + ref.object.sha);
+    const tree = [];
+    let i = 0;
+    for (const { f, rel } of files) {
+      const path = (dir ? dir + '/' : '') + rel;
+      log(`… (${++i}/${files.length}) ${path}`);
+      const blob = await gh('blobs', { method: 'POST', body: JSON.stringify({ content: await toB64(f), encoding: 'base64' }) });
+      tree.push({ path, mode: '100644', type: 'blob', sha: blob.sha });
+    }
+    const nt = await gh('trees', { method: 'POST', body: JSON.stringify({ base_tree: base.tree.sha, tree }) });
+    const nc = await gh('commits', { method: 'POST', body: JSON.stringify({
+      message: `${c.msg}（${files.length} 个文件）`, tree: nt.sha, parents: [ref.object.sha] }) });
+    await gh('refs/heads/' + encodeURIComponent(c.branch), { method: 'PATCH', body: JSON.stringify({ sha: nc.sha }) });
+    log(`✔ 已上传 ${files.length} 个文件（一次提交）  https://github.com/${c.owner}/${c.repo}/commit/${nc.sha}`, 'ok');
+  } catch (e) {
+    log(`✘ 上传失败：${e.message}（没有任何文件被提交）`, 'err');
+  }
+  $('go').disabled = false;
+  loadList();
+};
+
+function cfg() {
+  const c = Object.fromEntries(keys.map(k => [k, $(k).value.trim()]));
+  c.dir = c.dir.replace(/^\/+|\/+$/g, '');
+  c.H = { Authorization: 'Bearer ' + c.token, Accept: 'application/vnd.github+json' };
+  c.api = p => `https://api.github.com/repos/${c.owner}/${c.repo}/contents/${p.split('/').map(encodeURIComponent).join('/')}`;
+  return c;
+}
+
+async function loadList() {
+  const c = cfg(), box = $('list');
+  if (!c.token || !c.owner || !c.repo) { box.innerHTML = '<div style="padding:10px">请先填写 Token、用户、仓库</div>'; return; }
+  box.innerHTML = '<div style="padding:10px">加载中…</div>';
+  try {
+    const r = await fetch(c.api(c.dir) + '?ref=' + encodeURIComponent(c.branch), { headers: c.H });
+    if (r.status === 404) { box.innerHTML = '<div style="padding:10px">目录为空或不存在</div>'; return; }
+    const j = await r.json();
+    if (!r.ok) { box.innerHTML = `<div class="err" style="padding:10px">${r.status} ${j.message}</div>`; return; }
+    const all = Array.isArray(j) ? j : [j];
+    const folders = all.filter(x => x.type === 'dir');
+    const items = all.filter(x => x.type === 'file');
+    box.innerHTML = '';
+    const rowCss = 'display:flex;align-items:center;gap:8px;padding:8px 10px;border-bottom:1px solid #eaeef2;cursor:pointer';
+    const goDir = p => { $('dir').value = p; try { localStorage.setItem('gh_dir', p); } catch(e){} loadList(); };
+    // 当前位置 + 返回上级
+    const head = document.createElement('div');
+    head.style.cssText = rowCss + ';background:#f6f8fa;cursor:default';
+    head.textContent = '📍 /' + c.dir;
+    box.appendChild(head);
+    if (c.dir) {
+      const up = document.createElement('div');
+      up.style.cssText = rowCss; up.textContent = '⬆ 返回上级';
+      up.onclick = () => goDir(c.dir.split('/').slice(0, -1).join('/'));
+      box.appendChild(up);
+    }
+    for (const d of folders) {
+      const row = document.createElement('div');
+      row.style.cssText = rowCss;
+      row.innerHTML = `<span style="flex:1"></span>
+        <button style="margin:0;padding:4px 12px;background:#cf222e;font-size:13px">删除文件夹</button>`;
+      row.querySelector('span').textContent = '📁 ' + d.name;
+      row.onclick = () => goDir(d.path);
+      row.querySelector('button').onclick = e => { e.stopPropagation(); delDir(d.path, row); };
+      box.appendChild(row);
+    }
+    if (!items.length && !folders.length) box.insertAdjacentHTML('beforeend', '<div style="padding:10px">空目录</div>');
+    for (const it of items) {
+      const row = document.createElement('div');
+      row.style.cssText = 'display:flex;align-items:center;gap:8px;padding:8px 10px;border-bottom:1px solid #eaeef2';
+      row.innerHTML = `<a target="_blank" style="flex:1;word-break:break-all"></a><small style="color:#57606a"></small>
+        <button style="margin:0;padding:4px 12px;background:#cf222e;font-size:13px">删除</button>`;
+      row.querySelector('a').textContent = it.name;
+      row.querySelector('a').href = it.html_url;
+      row.querySelector('small').textContent = (it.size / 1024).toFixed(1) + ' KB';
+      row.querySelector('button').onclick = () => delFile(it, row);
+      box.appendChild(row);
+    }
+  } catch (e) { box.innerHTML = `<div class="err" style="padding:10px">${e.message}</div>`; }
+}
+
+async function delFile(it, row) {
+  if (!confirm(`确定删除 ${it.path} ？`)) return;
+  const c = cfg();
+  const r = await fetch(c.api(it.path), { method: 'DELETE', headers: c.H,
+    body: JSON.stringify({ message: `delete via web: ${it.name}`, sha: it.sha, branch: c.branch }) });
+  if (r.ok) { row.remove(); log(`🗑 已删除 ${it.path}`, 'ok'); }
+  else { const j = await r.json().catch(() => ({})); log(`✘ 删除 ${it.path}: ${r.status} ${j.message || ''}`, 'err'); }
+}
+
+// 删除整个文件夹：用 Git Data API 一次提交删掉其中所有文件（只触发一次 Cloudflare 构建）
+async function delDir(path, row) {
+  const c = cfg();
+  const gh = (p, opt = {}) => fetch(`https://api.github.com/repos/${c.owner}/${c.repo}/git/${p}`,
+    { ...opt, headers: c.H }).then(async r => { const j = await r.json().catch(() => ({}));
+      if (!r.ok) throw new Error(`${r.status} ${j.message || ''}`); return j; });
+  try {
+    const ref = await gh('ref/heads/' + encodeURIComponent(c.branch));
+    const commit = await gh('commits/' + ref.object.sha);
+    const tree = await gh(`trees/${commit.tree.sha}?recursive=1`);
+    if (tree.truncated) throw new Error('仓库文件太多，无法一次列出');
+    const victims = tree.tree.filter(x => x.type === 'blob' && (!path || x.path.startsWith(path + '/')));
+    if (!victims.length) throw new Error(path ? '文件夹里没有文件' : '仓库已经是空的');
+    const what = path ? `文件夹 ${path}` : `仓库 ${c.repo} 的【全部文件】`;
+    if (!confirm(`确定删除${what}？\n共 ${victims.length} 个文件：\n` +
+      victims.slice(0, 15).map(x => x.path).join('\n') + (victims.length > 15 ? '\n…' : ''))) return;
+    if (!path && prompt(`再次确认：输入仓库名 ${c.repo} 以清空全部文件`) !== c.repo) return log('已取消清空', 'err');
+    // 清空整个仓库时直接用 git 的空树
+    const treeSha = path ? (await gh('trees', { method: 'POST', body: JSON.stringify({ base_tree: commit.tree.sha,
+      tree: victims.map(x => ({ path: x.path, mode: x.mode, type: 'blob', sha: null })) }) })).sha
+      : '4b825dc642cb6eb9a060e54bf8d69288fbee4904';
+    const nc = await gh('commits', { method: 'POST', body: JSON.stringify({
+      message: path ? `delete folder via web: ${path}` : 'delete all files via web', tree: treeSha, parents: [ref.object.sha] }) });
+    await gh('refs/heads/' + encodeURIComponent(c.branch), { method: 'PATCH', body: JSON.stringify({ sha: nc.sha }) });
+    if (row) row.remove();
+    log(`🗑 已删除${what}（${victims.length} 个文件）`, 'ok');
+    if (!path) { $('dir').value = ''; loadList(); }
+  } catch (e) { log(`✘ 删除文件夹 ${path}: ${e.message}`, 'err'); }
+}
+
+$('ls').onclick = loadList;
+// 目标目录为空 = 清空整个仓库；否则删除该目录
+$('clearDir').onclick = () => delDir(cfg().dir, null);
+if ($('token').value && $('owner').value && $('repo').value) loadList();
+</script>
+</body>
+</html>
