@@ -35,6 +35,16 @@
   .file small{color:var(--mute);white-space:nowrap}
   #status{margin:10px 0;color:var(--mute);font-size:14px;min-height:20px}
   .empty{color:var(--mute);padding:16px 0;text-align:center}
+  .view{border:1px solid var(--pri);background:none;color:var(--pri);border-radius:6px;padding:3px 10px;cursor:pointer;font-size:13px;white-space:nowrap}
+  #pv{position:fixed;inset:0;background:#000c;display:flex;flex-direction:column;align-items:center;justify-content:center;padding:16px;z-index:9}
+  #pv[hidden]{display:none}
+  #pvBody{max-width:100%;max-height:85vh;display:flex;justify-content:center}
+  #pvBody img,#pvBody video{max-width:100%;max-height:85vh;border-radius:8px;background:#000}
+  #pvBody audio{width:min(90vw,520px)}
+  #pvBody iframe{width:min(92vw,900px);height:85vh;border:0;border-radius:8px;background:#fff}
+  #pvBar{color:#fff;margin-top:10px;display:flex;gap:16px;align-items:center;font-size:14px;max-width:92vw}
+  #pvBar span{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+  #pvBar a,#pvBar button{color:#93c5fd;background:none;border:0;cursor:pointer;font-size:14px;white-space:nowrap}
 </style>
 </head>
 <body>
@@ -66,6 +76,11 @@
     <div id="files"></div>
   </section>
 </main>
+
+<div id="pv" hidden>
+  <div id="pvBody"></div>
+  <div id="pvBar"><span id="pvName"></span><a id="pvDl" download>下载</a><button id="pvClose">关闭 ✕</button></div>
+</div>
 
 <script>
 const $ = id => document.getElementById(id);
@@ -140,14 +155,45 @@ $('send').onclick = send;
 $('text').onkeydown = e => { if (e.key === 'Enter' && e.ctrlKey) send(); };
 
 // ---------- 文件 ----------
+// 判断能否在线预览：图片 / 视频 / 音频 / PDF / 文本
+function kind(f) {
+  const t = (f.type || '').toLowerCase(), n = (f.name || '').toLowerCase();
+  if (/^image\/(png|jpe?g|gif|webp|avif|bmp)$/.test(t) || /\.(png|jpe?g|gif|webp|avif|bmp)$/.test(n)) return 'image';
+  if (t.startsWith('video/') || /\.(mp4|webm|mov|m4v|ogv)$/.test(n)) return 'video';
+  if (t.startsWith('audio/') || /\.(mp3|wav|ogg|m4a|aac|flac)$/.test(n)) return 'audio';
+  if (t === 'application/pdf' || n.endsWith('.pdf')) return 'pdf';
+  if (t === 'text/plain' || /\.(txt|log|md|csv)$/.test(n)) return 'text';
+  return '';
+}
+const icon = k => ({ image: '🖼️', video: '🎬', audio: '🎵', pdf: '📕', text: '📝' }[k] || '📄');
+function preview(f) {
+  const src = `/api/files/${f.id}?view=1`, k = kind(f);
+  const el = k === 'image' ? `<img src="${src}" alt="">`
+    : k === 'video' ? `<video src="${src}" controls autoplay playsinline></video>`
+    : k === 'audio' ? `<audio src="${src}" controls autoplay></audio>`
+    : `<iframe src="${src}"></iframe>`;
+  $('pvBody').innerHTML = el;
+  $('pvName').textContent = f.name;
+  $('pvDl').href = `/api/files/${f.id}`;
+  $('pv').hidden = false;
+  const v = $('pvBody').querySelector('video');
+  if (v) v.onerror = () => { $('pvName').textContent = f.name + '（此设备可能不支持该视频格式，请下载后观看）'; };
+}
+function closePv() { $('pv').hidden = true; $('pvBody').innerHTML = ''; }
+$('pvClose').onclick = closePv;
+$('pv').onclick = e => { if (e.target.id === 'pv') closePv(); };
+document.addEventListener('keydown', e => { if (e.key === 'Escape' && !$('pv').hidden) closePv(); });
+
 async function loadFiles() {
   try {
     const list = await api('/api/files');
     $('files').innerHTML = list.length ? list.map(f => `
-      <div class="file">📄 <a href="/api/files/${f.id}" download>${esc(f.name)}</a>
+      <div class="file">${icon(kind(f))} <a href="/api/files/${f.id}" download>${esc(f.name)}</a>
         <small>${fmtS(f.size || 0)} · ${fmtT(f.time)}</small>
+        ${kind(f) ? `<button class="view" data-id="${f.id}">${kind(f) === 'video' || kind(f) === 'audio' ? '播放' : '查看'}</button>` : ''}
         <button class="del" data-id="${f.id}">删除</button></div>`).join('')
       : '<div class="empty">暂无文件</div>';
+    $('files').querySelectorAll('.view').forEach(b => b.onclick = () => preview(list.find(f => f.id === b.dataset.id)));
     $('files').querySelectorAll('.del').forEach(b => b.onclick = async () => {
       if (!confirm('删除这个文件？')) return;
       try { await api('/api/files/' + b.dataset.id, { method: 'DELETE' }); loadFiles(); }

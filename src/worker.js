@@ -91,19 +91,41 @@ export default {
       }
       const m = p.match(/^\/api\/files\/([\w]+)$/);
       if (m && req.method === 'GET') {
-        let body, name, type;
+        // ?view=1：在浏览器里直接查看/播放；否则下载
+        const view = url.searchParams.get('view') === '1';
+        let body, name, type, status = 200;
+        const extra = {};
         if (useR2) {
-          const o = await env.R2.get(m[1]);
+          // 支持 Range 请求，视频可以拖动进度条
+          const o = await env.R2.get(m[1], { range: req.headers });
           if (!o) return json({ error: '文件不存在' }, 404);
           body = o.body; name = o.customMetadata?.name; type = o.customMetadata?.type;
+          extra['accept-ranges'] = 'bytes';
+          if (o.range && req.headers.has('range')) {
+            const off = o.range.offset ?? 0;
+            const len = o.range.length ?? (o.size - off);
+            status = 206;
+            extra['content-range'] = `bytes ${off}-${off + len - 1}/${o.size}`;
+            extra['content-length'] = String(len);
+          } else {
+            extra['content-length'] = String(o.size);
+          }
         } else {
           const { value, metadata } = await env.KV.getWithMetadata('file:' + m[1], 'stream');
           if (!value) return json({ error: '文件不存在' }, 404);
           body = value; name = metadata?.name; type = metadata?.type;
         }
-        return new Response(body, { headers: {
-          'content-type': type || 'application/octet-stream',
-          'content-disposition': `attachment; filename*=UTF-8''${encodeURIComponent(name || m[1])}`,
+        type = type || 'application/octet-stream';
+        // 安全：只允许图片、音视频、PDF、纯文本直接打开；网页、SVG 等一律下载，防止上传恶意网页
+        const safe = /^(image\/(png|jpe?g|gif|webp|avif|bmp)|video\/|audio\/|application\/pdf$|text\/plain)/i.test(type);
+        const inline = view && safe;
+        if (inline && /^text\//i.test(type)) type = 'text/plain; charset=utf-8';
+        return new Response(body, { status, headers: {
+          ...extra,
+          'content-type': type,
+          'x-content-type-options': 'nosniff',
+          ...(inline ? { 'content-security-policy': 'sandbox' } : {}),
+          'content-disposition': `${inline ? 'inline' : 'attachment'}; filename*=UTF-8''${encodeURIComponent(name || m[1])}`,
         } });
       }
       if (m && req.method === 'DELETE') {
