@@ -5,7 +5,16 @@
 
 const MAX_FILE = 20 * 1024 * 1024;    // KV：20MB（KV 单值上限 25MB）
 const MAX_FILE_R2 = 95 * 1024 * 1024; // R2：95MB（Workers 免费版请求体上限 100MB）
+const MAX_BIG = 5 * 1024 * 1024 * 1024; // 分片上传：单个文件最大 5GB（只开放给管理员，防止被人刷爆存储）
 const MAX_MSG = 1000;
+
+const MIME = {
+  mp4: 'video/mp4', m4v: 'video/mp4', webm: 'video/webm', ogv: 'video/ogg', mov: 'video/quicktime',
+  mp3: 'audio/mpeg', m4a: 'audio/mp4', aac: 'audio/aac', wav: 'audio/wav', ogg: 'audio/ogg', flac: 'audio/flac',
+  png: 'image/png', jpg: 'image/jpeg', jpeg: 'image/jpeg', gif: 'image/gif', webp: 'image/webp', avif: 'image/avif', bmp: 'image/bmp',
+  pdf: 'application/pdf', txt: 'text/plain', log: 'text/plain', md: 'text/plain', csv: 'text/plain',
+};
+const mimeByName = n => MIME[(String(n || '').split('.').pop() || '').toLowerCase()];
 
 const json = (data, status = 200) =>
   new Response(JSON.stringify(data), { status, headers: { 'content-type': 'application/json; charset=utf-8' } });
@@ -81,8 +90,50 @@ export default {
       const useR2 = !!env.R2;
       const maxFile = useR2 ? MAX_FILE_R2 : MAX_FILE;
       if (p === '/api/config' && req.method === 'GET') {
-        return json({ storage: useR2 ? 'R2' : 'KV', maxFile });
+        return json({ storage: useR2 ? 'R2' : 'KV', maxFile, maxBig: useR2 ? MAX_BIG : 0 });
       }
+      // ---------- 大文件分片上传（仅 R2、仅管理员）----------
+      // 1) start 建立上传  2) part 逐片上传（每片 < 95MB）  3) complete 合并  /  abort 取消
+      if (p.startsWith('/api/upload/')) {
+        if (!useR2) return json({ error: '大文件上传需要绑定 R2' }, 400);
+        if (!isAdmin(req, env)) return json({ error: '大文件只有管理员可以上传，请先点“管理”输入密钥' }, 403);
+        if (p === '/api/upload/start' && req.method === 'POST') {
+          const b = await req.json().catch(() => ({}));
+          const size = Number(b.size) || 0;
+          if (size > MAX_BIG) return json({ error: `文件超过 ${MAX_BIG / 1073741824}GB` }, 413);
+          const id = Date.now().toString(36) + rid();
+          const folder = cleanFolder(b.folder);
+          const type = String(b.type || 'application/octet-stream').slice(0, 100);
+          const name = String(b.name || id).split(/[\\/]/).pop().slice(0, 200);
+          const mpu = await env.R2.createMultipartUpload(id, { httpMetadata: { contentType: type },
+            customMetadata: { name, type, time: String(Date.now()), folder } });
+          return json({ id, uploadId: mpu.uploadId, folder });
+        }
+        const id = url.searchParams.get('id') || '', uploadId = url.searchParams.get('uploadId') || '';
+        if (!/^\w+$/.test(id) || !uploadId) return json({ error: '参数错误' }, 400);
+        const mpu = env.R2.resumeMultipartUpload(id, uploadId);
+        if (p === '/api/upload/part' && req.method === 'PUT') {
+          const n = Number(url.searchParams.get('part'));
+          if (!(n >= 1 && n <= 10000) || !req.body) return json({ error: '分片参数错误' }, 400);
+          const part = await mpu.uploadPart(n, req.body);
+          return json(part);
+        }
+        if (p === '/api/upload/complete' && req.method === 'POST') {
+          const b = await req.json().catch(() => ({}));
+          const parts = (b.parts || []).map(x => ({ partNumber: Number(x.partNumber), etag: String(x.etag) }));
+          if (!parts.length) return json({ error: '没有分片' }, 400);
+          const o = await mpu.complete(parts);
+          const folder = cleanFolder(b.folder);
+          if (folder && !(await env.KV.get('dir:' + folder))) await env.KV.put('dir:' + folder, '1');
+          return json({ ok: true, id, size: o.size });
+        }
+        if (p === '/api/upload/abort' && req.method === 'POST') {
+          await mpu.abort().catch(() => {});
+          return json({ ok: true });
+        }
+        return json({ error: 'Not found' }, 404);
+      }
+
       if (p === '/api/files' && req.method === 'GET') {
         const folder = cleanFolder(url.searchParams.get('folder'));
         const files = (await listFiles(env, useR2)).filter(f => (f.folder || '') === folder);
@@ -124,7 +175,7 @@ export default {
         if (f.size > maxFile) return json({ error: `文件超过 ${maxFile / 1048576}MB` }, 413);
         const id = Date.now().toString(36) + rid();
         const folder = cleanFolder(form.get('folder'));
-        const meta = { name: f.name.split(/[\\/]/).pop().slice(0, 200), size: f.size, type: f.type || 'application/octet-stream', time: Date.now(), folder };
+        const meta = { name: f.name.split(/[\\/]/).pop().slice(0, 200), size: f.size, type: f.type || mimeByName(f.name) || 'application/octet-stream', time: Date.now(), folder };
         if (useR2) {
           await env.R2.put(id, f, { httpMetadata: { contentType: meta.type },
             customMetadata: { name: meta.name, type: meta.type, time: String(meta.time), folder } });
@@ -161,7 +212,8 @@ export default {
           if (!value) return json({ error: '文件不存在' }, 404);
           body = value; name = metadata?.name; type = metadata?.type;
         }
-        type = type || 'application/octet-stream';
+        // 上传时浏览器没给类型（常见于 webm/mkv/m4a 等），按扩展名补上，否则 nosniff 下浏览器拒绝播放
+        if (!type || /^application\/octet-stream/i.test(type)) type = mimeByName(name) || 'application/octet-stream';
         // 安全：只允许图片、音视频、PDF、纯文本直接打开；网页、SVG 等一律下载，防止上传恶意网页
         const safe = /^(image\/(png|jpe?g|gif|webp|avif|bmp)|video\/|audio\/|application\/pdf$|text\/plain)/i.test(type);
         const inline = view && safe;
