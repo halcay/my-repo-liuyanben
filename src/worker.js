@@ -13,6 +13,28 @@ const rid = () => Math.random().toString(36).slice(2, 10);
 const revTs = () => String(9999999999999 - Date.now()).padStart(13, '0');
 const isAdmin = (req, env) => env.ADMIN_KEY && req.headers.get('x-admin-key') === env.ADMIN_KEY;
 
+// 文件夹名：去掉斜杠和首尾空格，最长 40 字；空字符串 = 根目录
+const cleanFolder = v => String(v || '').replace(/[\\/]/g, '').trim().slice(0, 40);
+
+// 列出全部文件（带 folder 字段）
+async function listFiles(env, useR2) {
+  const out = [];
+  if (useR2) {
+    let cursor;
+    do {
+      const r = await env.R2.list({ limit: 1000, cursor, include: ['customMetadata'] });
+      for (const o of r.objects) out.push({ id: o.key, name: o.customMetadata?.name || o.key, size: o.size,
+        type: o.customMetadata?.type, folder: o.customMetadata?.folder || '',
+        time: Number(o.customMetadata?.time) || o.uploaded.getTime() });
+      cursor = r.truncated ? r.cursor : null;
+    } while (cursor && out.length < 10000);
+  } else {
+    const keys = await listAll(env.KV, 'file:', 1000);
+    for (const k of keys) out.push({ id: k.name.slice(5), folder: '', ...(k.metadata || {}) });
+  }
+  return out;
+}
+
 async function listAll(kv, prefix, limit = 200) {
   const r = await kv.list({ prefix, limit });
   return r.keys;
@@ -62,17 +84,38 @@ export default {
         return json({ storage: useR2 ? 'R2' : 'KV', maxFile });
       }
       if (p === '/api/files' && req.method === 'GET') {
-        let files;
-        if (useR2) {
-          const r = await env.R2.list({ limit: 500, include: ['customMetadata'] });
-          files = r.objects.map(o => ({ id: o.key, name: o.customMetadata?.name || o.key, size: o.size,
-            type: o.customMetadata?.type, time: Number(o.customMetadata?.time) || o.uploaded.getTime() }));
-        } else {
-          const keys = await listAll(env.KV, 'file:', 500);
-          files = keys.map(k => ({ id: k.name.slice(5), ...(k.metadata || {}) }));
-        }
+        const folder = cleanFolder(url.searchParams.get('folder'));
+        const files = (await listFiles(env, useR2)).filter(f => (f.folder || '') === folder);
         files.sort((a, b) => (b.time || 0) - (a.time || 0));
         return json(files);
+      }
+
+      // ---------- 文件夹 ----------
+      if (p === '/api/folders' && req.method === 'GET') {
+        const files = await listFiles(env, useR2);
+        const map = {};
+        for (const k of await listAll(env.KV, 'dir:', 1000)) map[k.name.slice(4)] = { count: 0, size: 0 };
+        for (const f of files) if (f.folder) {
+          const d = map[f.folder] || (map[f.folder] = { count: 0, size: 0 });
+          d.count++; d.size += f.size || 0;
+        }
+        const list = Object.entries(map).map(([name, d]) => ({ name, ...d }));
+        list.sort((a, b) => a.name.localeCompare(b.name, 'zh', { numeric: false }));
+        return json(list);
+      }
+      if (p === '/api/folders' && req.method === 'POST') {
+        const b = await req.json().catch(() => ({}));
+        const name = cleanFolder(b.name);
+        if (!name) return json({ error: '文件夹名不能为空' }, 400);
+        await env.KV.put('dir:' + name, '1');
+        return json({ ok: true, name });
+      }
+      if (p.startsWith('/api/folders/') && req.method === 'DELETE') {
+        if (!isAdmin(req, env)) return json({ error: '管理密钥错误' }, 403);
+        const name = cleanFolder(decodeURIComponent(p.slice('/api/folders/'.length)));
+        if ((await listFiles(env, useR2)).some(f => f.folder === name)) return json({ error: '文件夹不为空，请先删除里面的文件' }, 400);
+        await env.KV.delete('dir:' + name);
+        return json({ ok: true });
       }
       if (p === '/api/files' && req.method === 'POST') {
         const form = await req.formData();
@@ -80,13 +123,16 @@ export default {
         if (!f || typeof f === 'string') return json({ error: '没有文件' }, 400);
         if (f.size > maxFile) return json({ error: `文件超过 ${maxFile / 1048576}MB` }, 413);
         const id = Date.now().toString(36) + rid();
-        const meta = { name: f.name.slice(0, 200), size: f.size, type: f.type || 'application/octet-stream', time: Date.now() };
+        const folder = cleanFolder(form.get('folder'));
+        const meta = { name: f.name.split(/[\\/]/).pop().slice(0, 200), size: f.size, type: f.type || 'application/octet-stream', time: Date.now(), folder };
         if (useR2) {
           await env.R2.put(id, f, { httpMetadata: { contentType: meta.type },
-            customMetadata: { name: meta.name, type: meta.type, time: String(meta.time) } });
+            customMetadata: { name: meta.name, type: meta.type, time: String(meta.time), folder } });
         } else {
           await env.KV.put('file:' + id, await f.arrayBuffer(), { metadata: meta });
         }
+        // 记录文件夹（已存在就不重复写，节省 KV 写入次数）
+        if (folder && !(await env.KV.get('dir:' + folder))) await env.KV.put('dir:' + folder, '1');
         return json({ ok: true, id, ...meta });
       }
       const m = p.match(/^\/api\/files\/([\w]+)$/);

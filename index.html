@@ -4,31 +4,116 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
 <title>我的站点</title>
+<meta name="description" content="资料、视频与交流的一站式页面">
 <style>
-  body{margin:0;font-family:system-ui,"Microsoft YaHei",sans-serif;background:#0f172a;color:#e2e8f0;min-height:100vh;display:flex;align-items:center;justify-content:center}
-  .card{max-width:520px;margin:16px;padding:32px;background:#1e293b;border-radius:14px;box-shadow:0 10px 30px #0006}
-  h1{margin:0 0 8px;font-size:28px}
-  p{color:#94a3b8;line-height:1.7}
-  .ok{display:inline-block;padding:4px 10px;border-radius:99px;background:#16a34a33;color:#4ade80;font-size:13px}
-  #t{font-family:monospace;color:#38bdf8}
+  :root{--bg:#f6f7fb;--card:#fff;--fg:#111827;--mute:#6b7280;--line:#e5e7eb;--pri:#2563eb;--pri-soft:#2563eb14}
+  @media (prefers-color-scheme:dark){:root{--bg:#0b1120;--card:#141c2f;--fg:#e5e7eb;--mute:#94a3b8;--line:#1f2a40;--pri:#60a5fa;--pri-soft:#60a5fa1a}}
+  *{box-sizing:border-box}
+  body{margin:0;font-family:system-ui,-apple-system,"PingFang SC","Microsoft YaHei",sans-serif;background:var(--bg);color:var(--fg);line-height:1.6}
+  a{color:inherit;text-decoration:none}
+  .wrap{max-width:1040px;margin:0 auto;padding:0 20px}
+
+  /* 顶部导航 */
+  header{border-bottom:1px solid var(--line);background:var(--card)}
+  header .wrap{display:flex;align-items:center;justify-content:space-between;height:64px;gap:16px}
+  .logo{font-size:18px;font-weight:700;letter-spacing:.5px}
+  nav{display:flex;gap:24px;font-size:15px;color:var(--mute)}
+  nav a:hover{color:var(--pri)}
+
+  /* 主视觉 */
+  .hero{padding:88px 0 72px;text-align:center}
+  .hero h1{margin:0 0 16px;font-size:40px;line-height:1.25;letter-spacing:1px}
+  .hero p{margin:0 auto 32px;max-width:600px;font-size:17px;color:var(--mute)}
+  .cta{display:inline-flex;gap:12px;flex-wrap:wrap;justify-content:center}
+  .btn{display:inline-block;padding:12px 26px;border-radius:8px;font-size:15px;font-weight:600}
+  .btn.pri{background:var(--pri);color:#fff}
+  .btn.pri:hover{opacity:.9}
+  .btn.out{border:1px solid var(--line);background:var(--card)}
+  .btn.out:hover{border-color:var(--pri);color:var(--pri)}
+
+  /* 功能入口 */
+  .sec-title{font-size:22px;margin:0 0 24px;text-align:center}
+  .grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(220px,1fr));gap:16px;padding-bottom:88px}
+  .item{display:block;background:var(--card);border:1px solid var(--line);border-radius:12px;padding:24px;transition:border-color .15s,transform .15s}
+  .item:hover{border-color:var(--pri);transform:translateY(-2px)}
+  .ico{width:44px;height:44px;border-radius:10px;background:var(--pri-soft);color:var(--pri);display:flex;align-items:center;justify-content:center;margin-bottom:14px}
+  .ico svg{width:22px;height:22px}
+  .item h3{margin:0 0 6px;font-size:17px}
+  .item p{margin:0;font-size:14px;color:var(--mute)}
+
+  footer{border-top:1px solid var(--line);padding:28px 0;font-size:13px;color:var(--mute)}
+  footer .wrap{display:flex;justify-content:space-between;flex-wrap:wrap;gap:12px}
+  footer a:hover{color:var(--pri)}
+
+  @media (max-width:640px){
+    nav{display:none}
+    .hero{padding:56px 0 48px}
+    .hero h1{font-size:28px}
+    .hero p{font-size:15px}
+  }
 </style>
 </head>
 <body>
-<div class="card">
-  <span class="ok">● 部署成功</span>
-  <h1>Hello, Cloudflare 👋</h1>
-  <p>这个页面来自 GitHub 仓库 <b>halcay/my-repo</b>，由 Cloudflare 自动部署。<br>
-  往仓库上传新文件，约一分钟后自动更新。</p>
-  <p>当前时间：<span id="t"></span></p>
-  <p>测试其他页面：<a href="/about.html" style="color:#38bdf8">关于页</a> ·
-  <a href="/docs/" style="color:#38bdf8">文档页（子目录）</a> ·
-  <a href="/board" style="color:#38bdf8">留言与文件</a> ·
-  <a href="/player.html" style="color:#38bdf8">视频播放</a> ·
-  <a href="/github-upload.html" style="color:#38bdf8">GitHub 上传</a></p>
-</div>
-<script>
-  const t = document.getElementById('t');
-  setInterval(() => t.textContent = new Date().toLocaleString('zh-CN'), 1000);
-</script>
+
+<header>
+  <div class="wrap">
+    <a class="logo" href="/">我的站点</a>
+    <nav>
+      <a href="/about.html">关于</a>
+      <a href="/docs/">文档</a>
+      <a href="/player.html">视频</a>
+      <a href="/files">资料下载</a>
+      <a href="/board">留言</a>
+    </nav>
+  </div>
+</header>
+
+<main>
+  <section class="hero">
+    <div class="wrap">
+      <h1>欢迎访问我的站点</h1>
+      <p>这里汇集了我们的介绍、视频与资料，欢迎留言交流与合作。</p>
+      <div class="cta">
+        <a class="btn pri" href="/about.html">了解我们</a>
+        <a class="btn out" href="/board">留言咨询</a>
+      </div>
+    </div>
+  </section>
+
+  <section class="wrap">
+    <h2 class="sec-title">快速入口</h2>
+    <div class="grid">
+      <a class="item" href="/docs/">
+        <div class="ico"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><path d="M14 2v6h6M8 13h8M8 17h5"/></svg></div>
+        <h3>文档</h3>
+        <p>说明与常见问题。</p>
+      </a>
+      <a class="item" href="/player.html">
+        <div class="ico"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="2" y="4" width="20" height="16" rx="2"/><path d="m10 9 5 3-5 3z"/></svg></div>
+        <h3>视频</h3>
+        <p>在线观看介绍视频。</p>
+      </a>
+      <a class="item" href="/files">
+        <div class="ico"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4M7 10l5 5 5-5M12 15V3"/></svg></div>
+        <h3>资料下载</h3>
+        <p>查看与下载相关文件。</p>
+      </a>
+      <a class="item" href="/board">
+        <div class="ico"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/></svg></div>
+        <h3>留言</h3>
+        <p>提出问题或合作意向，我们会尽快回复。</p>
+      </a>
+    </div>
+  </section>
+</main>
+
+<footer>
+  <div class="wrap">
+    <span>© <span id="y"></span> 我的站点 · 保留所有权利</span>
+    <a href="/github-upload.html">站点管理</a>
+  </div>
+</footer>
+
+<script>document.getElementById('y').textContent = new Date().getFullYear();</script>
 </body>
 </html>

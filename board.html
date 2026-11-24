@@ -3,7 +3,7 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
-<title>留言与文件</title>
+<title>留言本</title>
 <style>
   :root{--bg:#f4f6fb;--card:#fff;--fg:#1f2937;--mute:#6b7280;--line:#e5e7eb;--pri:#2563eb;--red:#dc2626}
   @media (prefers-color-scheme:dark){:root{--bg:#0f172a;--card:#1e293b;--fg:#e2e8f0;--mute:#94a3b8;--line:#334155;--pri:#60a5fa;--red:#f87171}}
@@ -12,11 +12,8 @@
   header{max-width:860px;margin:0 auto;padding:24px 16px 0;display:flex;align-items:center;gap:12px;flex-wrap:wrap}
   header h1{margin:0;font-size:24px;flex:1}
   header a{color:var(--pri);font-size:14px}
-  .tabs{max-width:860px;margin:16px auto 0;padding:0 16px;display:flex;gap:8px}
-  .tabs button{padding:8px 18px;border:1px solid var(--line);background:var(--card);color:var(--fg);border-radius:8px 8px 0 0;cursor:pointer;font-size:15px}
-  .tabs button.on{background:var(--pri);color:#fff;border-color:var(--pri)}
-  main{max-width:860px;margin:0 auto;padding:0 16px 40px}
-  .card{background:var(--card);border:1px solid var(--line);border-radius:0 10px 10px 10px;padding:18px}
+  main{max-width:860px;margin:16px auto 0;padding:0 16px 40px}
+  .card{background:var(--card);border:1px solid var(--line);border-radius:10px;padding:18px}
   input,textarea{width:100%;padding:10px;border:1px solid var(--line);border-radius:8px;background:var(--bg);color:var(--fg);font:inherit}
   textarea{min-height:90px;resize:vertical}
   .btn{padding:9px 20px;border:0;border-radius:8px;background:var(--pri);color:#fff;font-size:15px;cursor:pointer}
@@ -49,14 +46,10 @@
 </head>
 <body>
 <header>
-  <h1>💬 留言与文件</h1>
+  <h1>💬 留言本</h1>
   <a href="/">首页</a>
   <a href="#" id="adminBtn">管理</a>
 </header>
-<div class="tabs">
-  <button data-t="msg" class="on">留言本</button>
-  <button data-t="file">文件</button>
-</div>
 <main>
   <section id="t-msg" class="card">
     <div class="row"><input id="name" placeholder="昵称（可空）" maxlength="30" style="max-width:200px"></div>
@@ -69,20 +62,11 @@
     <div id="msgs"></div>
   </section>
 
-  <section id="t-file" class="card" hidden>
-    <div id="drop">点击或拖拽文件到这里上传（单个最大 20MB）</div>
-    <input id="fi" type="file" multiple hidden>
-    <div id="status"></div>
-    <div id="files"></div>
-  </section>
 </main>
 
-<div id="pv" hidden>
-  <div id="pvBody"></div>
-  <div id="pvBar"><span id="pvName"></span><a id="pvDl" download>下载</a><button id="pvClose">关闭 ✕</button></div>
-</div>
-
 <script>
+// 旧链接 /board#file 自动跳到文件页
+if (location.hash === '#file') location.replace('/files');
 const $ = id => document.getElementById(id);
 const esc = s => String(s).replace(/[&<>"]/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));
 const fmtT = t => new Date(t).toLocaleString('zh-CN', { hour12: false });
@@ -99,19 +83,10 @@ async function api(path, opt = {}) {
   return j;
 }
 
-// 标签切换
-document.querySelectorAll('.tabs button').forEach(b => b.onclick = () => {
-  document.querySelectorAll('.tabs button').forEach(x => x.classList.toggle('on', x === b));
-  $('t-msg').hidden = b.dataset.t !== 'msg';
-  $('t-file').hidden = b.dataset.t !== 'file';
-  location.hash = b.dataset.t;
-});
-if (location.hash === '#file') document.querySelector('[data-t=file]').click();
-
 // 管理模式
 $('adminBtn').onclick = async e => {
   e.preventDefault();
-  if (adminKey) { adminKey = ''; try { sessionStorage.removeItem('adminKey'); } catch (e) {} document.body.classList.remove('admin'); loadMsgs(); return; }
+  if (adminKey) { adminKey = ''; try { sessionStorage.removeItem('adminKey'); } catch (e) {} document.body.classList.remove('admin'); reload(); return; }
   const k = prompt('输入管理密钥（开启删除按钮）');
   if (!k) return;
   adminKey = k;
@@ -119,7 +94,7 @@ $('adminBtn').onclick = async e => {
   catch (err) { adminKey = ''; alert(err.message); return; }
   try { sessionStorage.setItem('adminKey', k); } catch (e) {}
   document.body.classList.add('admin');
-  loadMsgs();
+  reload();
 };
 
 // ---------- 留言 ----------
@@ -154,77 +129,8 @@ async function send() {
 $('send').onclick = send;
 $('text').onkeydown = e => { if (e.key === 'Enter' && e.ctrlKey) send(); };
 
-// ---------- 文件 ----------
-// 判断能否在线预览：图片 / 视频 / 音频 / PDF / 文本
-function kind(f) {
-  const t = (f.type || '').toLowerCase(), n = (f.name || '').toLowerCase();
-  if (/^image\/(png|jpe?g|gif|webp|avif|bmp)$/.test(t) || /\.(png|jpe?g|gif|webp|avif|bmp)$/.test(n)) return 'image';
-  if (t.startsWith('video/') || /\.(mp4|webm|mov|m4v|ogv)$/.test(n)) return 'video';
-  if (t.startsWith('audio/') || /\.(mp3|wav|ogg|m4a|aac|flac)$/.test(n)) return 'audio';
-  if (t === 'application/pdf' || n.endsWith('.pdf')) return 'pdf';
-  if (t === 'text/plain' || /\.(txt|log|md|csv)$/.test(n)) return 'text';
-  return '';
-}
-const icon = k => ({ image: '🖼️', video: '🎬', audio: '🎵', pdf: '📕', text: '📝' }[k] || '📄');
-function preview(f) {
-  const src = `/api/files/${f.id}?view=1`, k = kind(f);
-  const el = k === 'image' ? `<img src="${src}" alt="">`
-    : k === 'video' ? `<video src="${src}" controls autoplay playsinline></video>`
-    : k === 'audio' ? `<audio src="${src}" controls autoplay></audio>`
-    : `<iframe src="${src}"></iframe>`;
-  $('pvBody').innerHTML = el;
-  $('pvName').textContent = f.name;
-  $('pvDl').href = `/api/files/${f.id}`;
-  $('pv').hidden = false;
-  const v = $('pvBody').querySelector('video');
-  if (v) v.onerror = () => { $('pvName').textContent = f.name + '（此设备可能不支持该视频格式，请下载后观看）'; };
-}
-function closePv() { $('pv').hidden = true; $('pvBody').innerHTML = ''; }
-$('pvClose').onclick = closePv;
-$('pv').onclick = e => { if (e.target.id === 'pv') closePv(); };
-document.addEventListener('keydown', e => { if (e.key === 'Escape' && !$('pv').hidden) closePv(); });
-
-async function loadFiles() {
-  try {
-    const list = await api('/api/files');
-    $('files').innerHTML = list.length ? list.map(f => `
-      <div class="file">${icon(kind(f))} <a href="/api/files/${f.id}" download>${esc(f.name)}</a>
-        <small>${fmtS(f.size || 0)} · ${fmtT(f.time)}</small>
-        ${kind(f) ? `<button class="view" data-id="${f.id}">${kind(f) === 'video' || kind(f) === 'audio' ? '播放' : '查看'}</button>` : ''}
-        <button class="del" data-id="${f.id}">删除</button></div>`).join('')
-      : '<div class="empty">暂无文件</div>';
-    $('files').querySelectorAll('.view').forEach(b => b.onclick = () => preview(list.find(f => f.id === b.dataset.id)));
-    $('files').querySelectorAll('.del').forEach(b => b.onclick = async () => {
-      if (!confirm('删除这个文件？')) return;
-      try { await api('/api/files/' + b.dataset.id, { method: 'DELETE' }); loadFiles(); }
-      catch (e) { alert(e.message); }
-    });
-  } catch (e) { $('files').innerHTML = `<div class="empty">加载失败：${esc(e.message)}</div>`; }
-}
-async function upload(list) {
-  for (const f of list) {
-    if (f.size > maxFile) { $('status').textContent = `✘ ${f.name} 超过 ${maxFile / 1048576}MB`; continue; }
-    $('status').textContent = `上传中：${f.name} …`;
-    const fd = new FormData(); fd.append('file', f);
-    try { await api('/api/files', { method: 'POST', body: fd }); $('status').textContent = `✔ 已上传 ${f.name}`; }
-    catch (e) { $('status').textContent = `✘ ${f.name}：${e.message}`; }
-  }
-  loadFiles();
-}
-$('drop').onclick = () => $('fi').click();
-$('fi').onchange = e => { upload([...e.target.files]); e.target.value = ''; };
-$('drop').ondragover = e => { e.preventDefault(); $('drop').classList.add('over'); };
-$('drop').ondragleave = () => $('drop').classList.remove('over');
-$('drop').ondrop = e => { e.preventDefault(); $('drop').classList.remove('over'); upload([...e.dataTransfer.files]); };
-
-// 读取后端用的存储（R2 或 KV）和单文件上限
-let maxFile = 20 * 1024 * 1024;
-api('/api/config').then(c => {
-  maxFile = c.maxFile;
-  $('drop').textContent = `点击或拖拽文件到这里上传（单个最大 ${maxFile / 1048576}MB，存储：${c.storage}）`;
-}).catch(() => {});
-
-loadMsgs(); loadFiles();
+const reload = loadMsgs;
+loadMsgs();
 </script>
 </body>
 </html>
