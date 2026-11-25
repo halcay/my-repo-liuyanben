@@ -75,6 +75,7 @@
     <div id="drop">点击或拖拽文件到这里上传</div>
     <input id="fi" type="file" multiple hidden>
     <input id="fd" type="file" webkitdirectory multiple hidden>
+    <progress id="prog" max="100" value="0" hidden style="width:100%;height:10px;margin-top:10px"></progress>
     <div id="status"></div>
     <div id="dirs" class="dirs"></div>
     <div id="files"></div>
@@ -212,6 +213,31 @@ async function loadFiles() {
   } catch (e) { $('files').innerHTML = `<div class="empty">加载失败：${esc(e.message)}</div>`; }
 }
 
+// 用 XHR 发送，才能拿到实时上传进度（fetch 拿不到）
+function xhrSend(method, path, body, onProg) {
+  return new Promise((res, rej) => {
+    const x = new XMLHttpRequest();
+    x.open(method, path);
+    if (adminKey) x.setRequestHeader('x-admin-key', adminKey);
+    x.upload.onprogress = e => onProg && onProg(e.loaded);
+    x.onload = () => {
+      let j; try { j = JSON.parse(x.responseText); } catch (e) { j = { error: x.status + ' ' + x.statusText }; }
+      x.status >= 200 && x.status < 300 ? res(j) : rej(new Error(j.error || x.status));
+    };
+    x.onerror = () => rej(new Error('网络错误'));
+    x.send(body);
+  });
+}
+// 进度条 + 文字：已传 / 总量 / 速度 / 剩余时间
+function showProg(label, name, done, size, t0) {
+  const sec = Math.max((Date.now() - t0) / 1000, 0.001), speed = done / sec;
+  const left = speed > 0 ? (size - done) / speed : 0;
+  const eta = left > 3600 ? `${(left / 3600).toFixed(1)} 小时` : left > 60 ? `${Math.ceil(left / 60)} 分钟` : `${Math.ceil(left)} 秒`;
+  const pct = Math.min(100, done / size * 100);
+  $('prog').hidden = false; $('prog').value = pct;
+  $('status').textContent = `${label}${name}：${pct.toFixed(1)}%（${fmtS(done)} / ${fmtS(size)}，${fmtS(speed)}/秒，剩余约 ${eta}）`;
+}
+
 // 大文件分片上传：每片 20MB，逐片发送，失败自动重试 3 次
 const CHUNK = 20 * 1024 * 1024;
 async function uploadBig(f, folder, label) {
@@ -223,12 +249,15 @@ async function uploadBig(f, folder, label) {
     for (let i = 0; i < total; i++) {
       const blob = f.slice(i * CHUNK, Math.min(f.size, (i + 1) * CHUNK));
       for (let tryN = 1; ; tryN++) {
-        try { parts.push(await api(`/api/upload/part?${q}&part=${i + 1}`, { method: 'PUT', body: blob })); break; }
-        catch (e) { if (tryN >= 3) throw e; await new Promise(r => setTimeout(r, 1500 * tryN)); }
+        try {
+          parts.push(await xhrSend('PUT', `/api/upload/part?${q}&part=${i + 1}`, blob,
+            loaded => showProg(label, f.name, i * CHUNK + loaded, f.size, t0)));
+          break;
+        }
+        catch (e) { if (tryN >= 3) throw e; $('status').textContent += `（第 ${i + 1} 片失败，重试 ${tryN}）`; await new Promise(r => setTimeout(r, 1500 * tryN)); }
       }
-      const done = Math.min(f.size, (i + 1) * CHUNK), sec = (Date.now() - t0) / 1000;
-      $('status').textContent = `${label}${f.name}：${Math.floor(done / f.size * 100)}%（${fmtS(done)} / ${fmtS(f.size)}，${fmtS(done / sec)}/秒）`;
     }
+    $('status').textContent = `${label}${f.name}：正在合并文件…`;
     await api('/api/upload/complete?' + q, json({ parts, folder }));
   } catch (e) {
     api('/api/upload/abort?' + q, { method: 'POST' }).catch(() => {});
@@ -253,9 +282,11 @@ async function upload(items) {
     }
     $('status').textContent = `${label}${f.name} …`;
     const fd = new FormData(); fd.append('file', f); fd.append('folder', folder);
-    try { await api('/api/files', { method: 'POST', body: fd }); ok++; }
+    const t0 = Date.now();
+    try { await xhrSend('POST', '/api/files', fd, loaded => showProg(label, f.name, Math.min(loaded, f.size), f.size, t0)); ok++; }
     catch (e) { $('status').textContent = `✘ ${f.name}：${e.message}`; }
   }
+  $('prog').hidden = true;
   if (items.length && ok === items.length) $('status').textContent = `✔ 已上传 ${ok} 个文件`;
   else if (items.length > 1) $('status').textContent = `已上传 ${ok}/${items.length} 个，失败 ${items.length - ok} 个。最后一个错误：${$('status').textContent.replace(/^✘ /, '')}`;
   reload();

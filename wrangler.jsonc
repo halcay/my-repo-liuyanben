@@ -16,5 +16,7 @@
   "r2_buckets": [
     { "binding": "R2", "bucket_name": "board-files" }
   ],
-  "observability": { "enabled": true }
+  "observability": { "enabled": true },
+  // 部署时保留在 Cloudflare 后台手动添加的变量，不被这份配置清掉
+  "keep_vars": true
 }
