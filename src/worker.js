@@ -63,6 +63,54 @@ export default {
         return isAdmin(req, env) ? json({ ok: true }) : json({ ok: false, error: '管理密钥错误' }, 403);
       }
 
+      // ---------- 博客文章 ----------
+      // KV 键 post:<slug>，值 = {title, content(Markdown), tags, draft, time, updated}
+      // metadata 存列表要用的字段（≤1KB），列表不用逐篇读正文
+      if (p === '/api/posts' && req.method === 'GET') {
+        const admin = isAdmin(req, env);
+        const keys = await listAll(env.KV, 'post:', 1000);
+        const posts = keys.map(k => ({ slug: k.name.slice(5), ...(k.metadata || {}) }))
+          .filter(x => admin || !x.draft)
+          .sort((a, b) => (b.time || 0) - (a.time || 0));
+        return json(posts);
+      }
+      const pm = p.match(/^\/api\/posts\/(.+)$/);
+      if (pm) {
+        let slug; try { slug = decodeURIComponent(pm[1]); } catch (e) { return json({ error: '地址错误' }, 400); }
+        if (req.method === 'GET') {
+          const post = await env.KV.get('post:' + slug, 'json');
+          if (!post || (post.draft && !isAdmin(req, env))) return json({ error: '文章不存在' }, 404);
+          return json({ slug, ...post });
+        }
+        if (!isAdmin(req, env)) return json({ error: '管理密钥错误' }, 403);
+        if (req.method === 'PUT') {
+          const b = await req.json().catch(() => ({}));
+          const title = String(b.title || '').trim().slice(0, 120);
+          const content = String(b.content || '');
+          if (!title) return json({ error: '标题不能为空' }, 400);
+          if (content.length > 500000) return json({ error: '正文太长（上限约 50 万字）' }, 413);
+          // 文章地址只允许字母数字中文和 - _
+          const newSlug = String(b.slug || slug).trim().replace(/[^\w一-龥-]+/g, '-').replace(/^-+|-+$/g, '').slice(0, 80);
+          if (!newSlug) return json({ error: '文章地址不能为空' }, 400);
+          const old = await env.KV.get('post:' + slug, 'json');
+          if (newSlug !== slug && await env.KV.get('post:' + newSlug)) return json({ error: '这个文章地址已被占用' }, 409);
+          const tags = (Array.isArray(b.tags) ? b.tags : String(b.tags || '').split(/[,，\s]+/))
+            .map(t => String(t).trim().slice(0, 20)).filter(Boolean).slice(0, 10);
+          const now = Date.now();
+          const post = { title, content, tags, draft: !!b.draft, time: old?.time || now, updated: now };
+          // 摘要：去掉 Markdown 符号取前 120 字
+          const summary = content.replace(/!\[[^\]]*\]\([^)]*\)/g, '').replace(/[#>*`_\-\[\]()|]/g, '').replace(/\s+/g, ' ').trim().slice(0, 120);
+          const meta = { title, summary, tags, draft: post.draft, time: post.time, updated: now };
+          await env.KV.put('post:' + newSlug, JSON.stringify(post), { metadata: meta });
+          if (old && newSlug !== slug) await env.KV.delete('post:' + slug);
+          return json({ ok: true, slug: newSlug });
+        }
+        if (req.method === 'DELETE') {
+          await env.KV.delete('post:' + slug);
+          return json({ ok: true });
+        }
+      }
+
       // ---------- 留言 ----------
       if (p === '/api/messages' && req.method === 'GET') {
         const keys = await listAll(env.KV, 'msg:', 100);
