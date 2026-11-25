@@ -1,0 +1,131 @@
+<!doctype html>
+<html lang="zh">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>博客</title>
+<style>
+  :root{--bg:#fafaf7;--card:#fff;--fg:#1f2328;--mute:#6b7280;--line:#e7e5e0;--pri:#0f766e;--code:#f3f2ee}
+  @media (prefers-color-scheme:dark){:root{--bg:#121212;--card:#1b1b1b;--fg:#e6e6e6;--mute:#9a9a9a;--line:#2c2c2c;--pri:#2dd4bf;--code:#242424}}
+  *{box-sizing:border-box}
+  body{margin:0;background:var(--bg);color:var(--fg);font-family:-apple-system,"PingFang SC","Microsoft YaHei",sans-serif;line-height:1.75}
+  .wrap{max-width:760px;margin:0 auto;padding:28px 16px 60px}
+  header{display:flex;align-items:center;gap:14px;flex-wrap:wrap;margin-bottom:24px}
+  header h1{margin:0;font-size:26px;flex:1}
+  header h1 a{color:inherit;text-decoration:none}
+  header a{color:var(--pri);font-size:14px;text-decoration:none}
+  .admin-only{display:none} body.admin .admin-only{display:inline}
+  .tags{display:flex;gap:6px;flex-wrap:wrap;margin:-8px 0 18px}
+  .tag{font-size:12px;padding:2px 10px;border-radius:99px;background:var(--code);color:var(--mute);cursor:pointer;border:1px solid var(--line)}
+  .tag.on{background:var(--pri);color:#fff;border-color:var(--pri)}
+  .post{display:block;padding:18px 0;border-bottom:1px solid var(--line);color:inherit;text-decoration:none}
+  .post h2{margin:0 0 4px;font-size:20px}
+  .post:hover h2{color:var(--pri)}
+  .post p{margin:4px 0 0;color:var(--mute);font-size:14px}
+  .meta{font-size:13px;color:var(--mute)}
+  .draft{font-size:12px;color:#b45309;border:1px solid #b45309;border-radius:4px;padding:0 6px;margin-left:6px}
+  article h1{font-size:30px;line-height:1.3;margin:0 0 8px}
+  .body{margin-top:24px;font-size:16.5px;word-wrap:break-word}
+  .body img,.body video{max-width:100%;border-radius:8px}
+  .body pre{background:var(--code);padding:14px;border-radius:8px;overflow:auto;line-height:1.5}
+  .body code{background:var(--code);padding:1px 5px;border-radius:4px;font-size:.92em}
+  .body pre code{background:none;padding:0}
+  .body blockquote{margin:0;padding:2px 16px;border-left:4px solid var(--pri);color:var(--mute)}
+  .body table{border-collapse:collapse;display:block;overflow:auto}
+  .body th,.body td{border:1px solid var(--line);padding:6px 10px}
+  .body a{color:var(--pri)}
+  .actions{margin-top:30px;display:flex;gap:14px;font-size:14px}
+  .actions a,.actions button{color:var(--pri);background:none;border:0;cursor:pointer;font-size:14px;padding:0;text-decoration:none}
+  .actions .del{color:#dc2626}
+  .empty{color:var(--mute);text-align:center;padding:40px 0}
+</style>
+</head>
+<body>
+<div class="wrap">
+  <header>
+    <h1><a href="/docs/">📝 博客</a></h1>
+    <a href="/">首页</a>
+    <a class="admin-only" href="/docs/edit.html">＋ 写文章</a>
+    <a href="#" id="adminBtn">管理</a>
+  </header>
+  <main id="main"><div class="empty">加载中…</div></main>
+</div>
+
+<script src="https://cdnjs.cloudflare.com/ajax/libs/marked/12.0.2/marked.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/dompurify/3.1.6/purify.min.js"></script>
+<script>
+const $ = id => document.getElementById(id);
+const esc = s => String(s ?? '').replace(/[&<>"]/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));
+const fmtD = t => new Date(t).toLocaleDateString('zh-CN', { year: 'numeric', month: 'long', day: 'numeric' });
+let adminKey = ''; try { adminKey = sessionStorage.getItem('adminKey') || ''; } catch (e) {}
+if (adminKey) document.body.classList.add('admin');
+
+async function api(path, opt = {}) {
+  opt.headers = { ...(opt.headers || {}), ...(adminKey ? { 'x-admin-key': adminKey } : {}) };
+  const r = await fetch(path, opt);
+  const j = await r.json().catch(() => ({ error: r.status + ' ' + r.statusText }));
+  if (!r.ok) throw new Error(j.error || r.status);
+  return j;
+}
+
+$('adminBtn').onclick = async e => {
+  e.preventDefault();
+  if (adminKey) { adminKey = ''; try { sessionStorage.removeItem('adminKey'); } catch (e) {} document.body.classList.remove('admin'); route(); return; }
+  const k = prompt('输入管理密钥'); if (!k) return;
+  adminKey = k;
+  try { await api('/api/admin'); } catch (err) { adminKey = ''; alert(err.message); return; }
+  try { sessionStorage.setItem('adminKey', k); } catch (e) {}
+  document.body.classList.add('admin'); route();
+};
+
+// Markdown → 安全的 HTML（DOMPurify 过滤脚本）
+const md = s => window.marked && window.DOMPurify
+  ? DOMPurify.sanitize(marked.parse(s), { ADD_TAGS: ['video', 'audio', 'source'], ADD_ATTR: ['controls', 'playsinline'] })
+  : '<pre>' + esc(s) + '</pre>';
+
+let allPosts = [], tagFilter = '';
+function renderList() {
+  const tags = [...new Set(allPosts.flatMap(p => p.tags || []))];
+  const list = tagFilter ? allPosts.filter(p => (p.tags || []).includes(tagFilter)) : allPosts;
+  $('main').innerHTML =
+    (tags.length ? `<div class="tags">${tags.map(t => `<span class="tag ${t === tagFilter ? 'on' : ''}" data-t="${esc(t)}">#${esc(t)}</span>`).join('')}</div>` : '') +
+    (list.length ? list.map(p => `
+      <a class="post" href="?p=${encodeURIComponent(p.slug)}">
+        <h2>${esc(p.title)}${p.draft ? '<span class="draft">草稿</span>' : ''}</h2>
+        <div class="meta">${fmtD(p.time)}${(p.tags || []).map(t => ' · #' + esc(t)).join('')}</div>
+        ${p.summary ? `<p>${esc(p.summary)}…</p>` : ''}
+      </a>`).join('') : '<div class="empty">还没有文章</div>');
+  $('main').querySelectorAll('.tag').forEach(t => t.onclick = () => { tagFilter = tagFilter === t.dataset.t ? '' : t.dataset.t; renderList(); });
+  document.title = '博客';
+}
+
+async function showPost(slug) {
+  try {
+    const p = await api('/api/posts/' + encodeURIComponent(slug));
+    document.title = p.title;
+    $('main').innerHTML = `<article>
+      <h1>${esc(p.title)}${p.draft ? '<span class="draft">草稿</span>' : ''}</h1>
+      <div class="meta">${fmtD(p.time)}${p.updated && p.updated - p.time > 60000 ? ' · 更新于 ' + fmtD(p.updated) : ''}${(p.tags || []).map(t => ' · #' + esc(t)).join('')}</div>
+      <div class="body">${md(p.content)}</div>
+      <div class="actions"><a href="/docs/">← 全部文章</a>
+        <a class="admin-only" href="/docs/edit.html?p=${encodeURIComponent(slug)}">编辑</a>
+        <button class="admin-only del" id="delPost">删除</button></div>
+    </article>`;
+    $('delPost').onclick = async () => {
+      if (!confirm(`删除文章「${p.title}」？无法恢复`)) return;
+      try { await api('/api/posts/' + encodeURIComponent(slug), { method: 'DELETE' }); location.href = '/docs/'; }
+      catch (e) { alert(e.message); }
+    };
+  } catch (e) { $('main').innerHTML = `<div class="empty">${esc(e.message)}　<a href="/docs/">返回列表</a></div>`; }
+}
+
+async function route() {
+  const slug = new URLSearchParams(location.search).get('p');
+  if (slug) return showPost(slug);
+  try { allPosts = await api('/api/posts'); renderList(); }
+  catch (e) { $('main').innerHTML = `<div class="empty">加载失败：${esc(e.message)}</div>`; }
+}
+route();
+</script>
+</body>
+</html>

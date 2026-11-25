@@ -1,0 +1,204 @@
+<!doctype html>
+<html lang="zh">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>写文章</title>
+<style>
+  :root{--bg:#fafaf7;--card:#fff;--fg:#1f2328;--mute:#6b7280;--line:#e7e5e0;--pri:#0f766e;--code:#f3f2ee}
+  @media (prefers-color-scheme:dark){:root{--bg:#121212;--card:#1b1b1b;--fg:#e6e6e6;--mute:#9a9a9a;--line:#2c2c2c;--pri:#2dd4bf;--code:#242424}}
+  *{box-sizing:border-box}
+  body{margin:0;background:var(--bg);color:var(--fg);font-family:-apple-system,"PingFang SC","Microsoft YaHei",sans-serif}
+  .bar{position:sticky;top:0;z-index:5;background:var(--bg);border-bottom:1px solid var(--line);padding:10px 16px;display:flex;gap:10px;align-items:center;flex-wrap:wrap}
+  .bar a{color:var(--pri);text-decoration:none;font-size:14px}
+  .bar .sp{flex:1}
+  .bar small{color:var(--mute)}
+  button{padding:7px 16px;border:0;border-radius:6px;background:var(--pri);color:#fff;font-size:14px;cursor:pointer}
+  button.gray{background:var(--code);color:var(--fg);border:1px solid var(--line)}
+  button:disabled{opacity:.5}
+  .fields{max-width:1200px;margin:14px auto 0;padding:0 16px;display:grid;grid-template-columns:2fr 1fr 1fr;gap:10px}
+  input,textarea{width:100%;padding:9px 11px;border:1px solid var(--line);border-radius:8px;background:var(--card);color:var(--fg);font:inherit}
+  #title{font-size:20px;font-weight:600}
+  .edit{max-width:1200px;margin:12px auto 30px;padding:0 16px;display:grid;grid-template-columns:1fr 1fr;gap:14px}
+  #content{min-height:65vh;font:14.5px/1.7 Consolas,"Microsoft YaHei",monospace;resize:vertical}
+  #content.over{outline:2px dashed var(--pri)}
+  #preview{background:var(--card);border:1px solid var(--line);border-radius:8px;padding:6px 20px;min-height:65vh;max-height:80vh;overflow:auto;line-height:1.75}
+  #preview img,#preview video{max-width:100%;border-radius:6px}
+  #preview pre{background:var(--code);padding:12px;border-radius:6px;overflow:auto}
+  #preview code{background:var(--code);padding:1px 4px;border-radius:4px}
+  #preview pre code{background:none}
+  #preview blockquote{margin:0;padding:2px 14px;border-left:4px solid var(--pri);color:var(--mute)}
+  .tools{display:flex;gap:6px;flex-wrap:wrap;margin-bottom:6px}
+  .tools button{padding:4px 10px;font-size:13px}
+  #st{font-size:13px;color:var(--mute)}
+  @media (max-width:800px){.fields{grid-template-columns:1fr}.edit{grid-template-columns:1fr}#preview{display:none}#preview.show{display:block}}
+</style>
+</head>
+<body>
+<div class="bar">
+  <a href="/docs/">← 博客</a>
+  <span id="st"></span>
+  <span class="sp"></span>
+  <label style="font-size:14px;display:flex;gap:4px;align-items:center"><input id="draft" type="checkbox" style="width:auto"> 草稿（不公开）</label>
+  <button class="gray" id="pvBtn">预览</button>
+  <button id="saveBtn">发布 <small style="color:#fff9">Ctrl+S</small></button>
+</div>
+
+<div class="fields">
+  <input id="title" placeholder="标题">
+  <input id="slug" placeholder="文章地址（可空，自动生成）">
+  <input id="tags" placeholder="标签，用逗号分隔">
+</div>
+
+<div class="edit">
+  <div>
+    <div class="tools">
+      <button class="gray" data-w="**|**">粗体</button>
+      <button class="gray" data-w="## |">标题</button>
+      <button class="gray" data-w="> |">引用</button>
+      <button class="gray" data-w="`|`">代码</button>
+      <button class="gray" data-w="[|](https://)">链接</button>
+      <button class="gray" id="imgBtn">🖼 插入图片/视频/文件</button>
+      <input id="fi" type="file" multiple hidden>
+    </div>
+    <textarea id="content" placeholder="用 Markdown 写正文……&#10;&#10;图片可以直接粘贴（Ctrl+V）或拖进来，会自动上传"></textarea>
+  </div>
+  <div id="preview"></div>
+</div>
+
+<script src="https://cdnjs.cloudflare.com/ajax/libs/marked/12.0.2/marked.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/dompurify/3.1.6/purify.min.js"></script>
+<script>
+const $ = id => document.getElementById(id);
+const st = t => $('st').textContent = t;
+let adminKey = ''; try { adminKey = sessionStorage.getItem('adminKey') || ''; } catch (e) {}
+const editing = new URLSearchParams(location.search).get('p');   // 编辑已有文章时的地址
+const DRAFT_KEY = 'blogDraft:' + (editing || '_new');
+
+async function api(path, opt = {}) {
+  opt.headers = { ...(opt.headers || {}), ...(adminKey ? { 'x-admin-key': adminKey } : {}) };
+  const r = await fetch(path, opt);
+  const j = await r.json().catch(() => ({ error: r.status + ' ' + r.statusText }));
+  if (!r.ok) throw new Error(j.error || r.status);
+  return j;
+}
+
+// 没登录管理员：先要密钥
+async function ensureAdmin() {
+  while (true) {
+    if (adminKey) { try { await api('/api/admin'); return true; } catch (e) { alert(e.message); } }
+    const k = prompt('写文章需要管理密钥'); if (!k) { location.href = '/docs/'; return false; }
+    adminKey = k;
+    try { await api('/api/admin'); sessionStorage.setItem('adminKey', k); return true; } catch (e) { alert(e.message); adminKey = ''; }
+  }
+}
+
+// ---------- 预览 ----------
+const md = s => window.marked && window.DOMPurify
+  ? DOMPurify.sanitize(marked.parse(s), { ADD_TAGS: ['video', 'audio', 'source'], ADD_ATTR: ['controls', 'playsinline'] }) : '';
+let pvTimer;
+function refresh() {
+  clearTimeout(pvTimer);
+  pvTimer = setTimeout(() => { $('preview').innerHTML = md($('content').value); }, 200);
+  // 本地自动保存，防止误关页面
+  try { localStorage.setItem(DRAFT_KEY, JSON.stringify(collect())); } catch (e) {}
+  dirty = true;
+}
+let dirty = false;
+['content', 'title', 'slug', 'tags'].forEach(id => $(id).addEventListener('input', refresh));
+$('pvBtn').onclick = () => $('preview').classList.toggle('show');
+window.addEventListener('beforeunload', e => { if (dirty) { e.preventDefault(); e.returnValue = ''; } });
+
+// ---------- 工具栏 ----------
+function insert(text, wrap) {
+  const ta = $('content'), s = ta.selectionStart, e = ta.selectionEnd, sel = ta.value.slice(s, e);
+  let ins = text;
+  if (wrap) { const [a, b] = wrap.split('|'); ins = a + sel + b; }
+  ta.setRangeText(ins, s, e, 'end'); ta.focus(); refresh();
+}
+document.querySelectorAll('[data-w]').forEach(b => b.onclick = () => insert('', b.dataset.w));
+
+// ---------- 上传图片 / 视频 / 文件（存到“blog”文件夹） ----------
+async function uploadFiles(list) {
+  for (const f of list) {
+    const ph = `![上传中：${f.name}…]()`;
+    insert(ph + '\n');
+    st(`上传中：${f.name}`);
+    try {
+      const fd = new FormData(); fd.append('file', f); fd.append('folder', 'blog');
+      const r = await api('/api/files', { method: 'POST', body: fd });
+      const url = `/api/files/${encodeURIComponent(r.id)}?view=1`;
+      const t = f.type || '';
+      const mdText = t.startsWith('image/') ? `![${f.name}](${url})`
+        : t.startsWith('video/') ? `<video src="${url}" controls playsinline></video>`
+        : t.startsWith('audio/') ? `<audio src="${url}" controls></audio>`
+        : `[📎 ${f.name}](/api/files/${encodeURIComponent(r.id)})`;
+      $('content').value = $('content').value.replace(ph, mdText);
+      st(`✔ 已上传 ${f.name}`);
+    } catch (e) {
+      $('content').value = $('content').value.replace(ph + '\n', '');
+      st(`✘ ${f.name}：${e.message}`);
+    }
+    refresh();
+  }
+}
+$('imgBtn').onclick = () => $('fi').click();
+$('fi').onchange = e => { uploadFiles([...e.target.files]); e.target.value = ''; };
+$('content').addEventListener('paste', e => {
+  const fs = [...(e.clipboardData?.files || [])];
+  if (fs.length) { e.preventDefault(); uploadFiles(fs); }
+});
+$('content').addEventListener('dragover', e => { e.preventDefault(); $('content').classList.add('over'); });
+$('content').addEventListener('dragleave', () => $('content').classList.remove('over'));
+$('content').addEventListener('drop', e => {
+  $('content').classList.remove('over');
+  const fs = [...e.dataTransfer.files];
+  if (fs.length) { e.preventDefault(); uploadFiles(fs); }
+});
+
+// ---------- 保存 ----------
+function collect() {
+  return { title: $('title').value.trim(), slug: $('slug').value.trim(), tags: $('tags').value,
+    content: $('content').value, draft: $('draft').checked };
+}
+async function save() {
+  const d = collect();
+  if (!d.title) { alert('请填写标题'); return $('title').focus(); }
+  // 新文章没填地址：用日期+随机串
+  const slug = editing || d.slug || new Date().toISOString().slice(0, 10) + '-' + Math.random().toString(36).slice(2, 6);
+  $('saveBtn').disabled = true; st('保存中…');
+  try {
+    const r = await api('/api/posts/' + encodeURIComponent(slug), { method: 'PUT',
+      headers: { 'content-type': 'application/json' }, body: JSON.stringify({ ...d, slug: d.slug || slug }) });
+    dirty = false;
+    try { localStorage.removeItem(DRAFT_KEY); } catch (e) {}
+    st('✔ 已保存');
+    location.href = '/docs/?p=' + encodeURIComponent(r.slug);
+  } catch (e) { st('✘ ' + e.message); alert('保存失败：' + e.message); }
+  $('saveBtn').disabled = false;
+}
+$('saveBtn').onclick = save;
+document.addEventListener('keydown', e => { if ((e.ctrlKey || e.metaKey) && e.key === 's') { e.preventDefault(); save(); } });
+$('draft').onchange = () => { $('saveBtn').firstChild.textContent = $('draft').checked ? '保存草稿 ' : '发布 '; refresh(); };
+
+// ---------- 启动 ----------
+(async () => {
+  if (!await ensureAdmin()) return;
+  let local = null; try { local = JSON.parse(localStorage.getItem(DRAFT_KEY) || 'null'); } catch (e) {}
+  let d = null;
+  if (editing) {
+    try { const p = await api('/api/posts/' + encodeURIComponent(editing));
+      d = { title: p.title, slug: editing, tags: (p.tags || []).join(', '), content: p.content, draft: !!p.draft }; }
+    catch (e) { alert('读取文章失败：' + e.message); }
+    $('slug').value = editing;
+  }
+  if (local && local.content && local.content !== d?.content && confirm('发现上次没保存的内容，要恢复吗？')) d = local;
+  if (d) { $('title').value = d.title || ''; if (d.slug) $('slug').value = d.slug; $('tags').value = d.tags || ''; $('content').value = d.content || ''; $('draft').checked = !!d.draft; }
+  document.title = editing ? '编辑：' + ($('title').value || editing) : '写文章';
+  $('draft').onchange();
+  dirty = false;
+  $('preview').innerHTML = md($('content').value);
+})();
+</script>
+</body>
+</html>

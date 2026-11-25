@@ -1,0 +1,190 @@
+<!doctype html>
+<html lang="zh">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>我的站点</title>
+<meta name="description" content="博客、文件、影音与留言的个人站点">
+<style>
+  :root{--bg:#f6f7fb;--card:#fff;--fg:#111827;--mute:#6b7280;--line:#e5e7eb;--pri:#2563eb;--pri-soft:#2563eb14;
+    --c1:#0f766e;--c2:#2563eb;--c3:#9333ea;--c4:#ea580c;--c5:#64748b}
+  @media (prefers-color-scheme:dark){:root{--bg:#0b1120;--card:#141c2f;--fg:#e5e7eb;--mute:#94a3b8;--line:#1f2a40;--pri:#60a5fa;--pri-soft:#60a5fa1a;
+    --c1:#2dd4bf;--c2:#60a5fa;--c3:#c084fc;--c4:#fb923c;--c5:#94a3b8}}
+  *{box-sizing:border-box}
+  body{margin:0;font-family:system-ui,-apple-system,"PingFang SC","Microsoft YaHei",sans-serif;background:var(--bg);color:var(--fg);line-height:1.6}
+  a{color:inherit;text-decoration:none}
+  .wrap{max-width:1080px;margin:0 auto;padding:0 20px}
+
+  header{border-bottom:1px solid var(--line);background:var(--card);position:sticky;top:0;z-index:10}
+  header .wrap{display:flex;align-items:center;height:60px;gap:16px}
+  .logo{font-size:18px;font-weight:700;margin-right:auto}
+  nav{display:flex;gap:22px;font-size:15px;color:var(--mute)}
+  nav a:hover{color:var(--pri)}
+
+  .hero{padding:72px 0 56px;text-align:center}
+  .hero h1{margin:0 0 14px;font-size:38px;line-height:1.25}
+  .hero p{margin:0 auto;max-width:620px;font-size:17px;color:var(--mute)}
+  .stats{display:flex;justify-content:center;gap:36px;margin-top:30px;flex-wrap:wrap}
+  .stats div{text-align:center}
+  .stats b{display:block;font-size:26px;color:var(--pri)}
+  .stats span{font-size:13px;color:var(--mute)}
+
+  .grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(190px,1fr));gap:14px}
+  .item{display:block;background:var(--card);border:1px solid var(--line);border-radius:14px;padding:22px;transition:border-color .15s,transform .15s}
+  .item:hover{border-color:var(--c);transform:translateY(-2px)}
+  .ico{width:44px;height:44px;border-radius:11px;display:flex;align-items:center;justify-content:center;margin-bottom:12px;
+    color:var(--c);background:color-mix(in srgb,var(--c) 12%,transparent)}
+  .ico svg{width:22px;height:22px}
+  .item h3{margin:0 0 4px;font-size:17px}
+  .item p{margin:0;font-size:13.5px;color:var(--mute)}
+
+  .cols{display:grid;grid-template-columns:1.4fr 1fr;gap:18px;margin:44px 0 70px}
+  .panel{background:var(--card);border:1px solid var(--line);border-radius:14px;padding:6px 20px 14px}
+  .panel h2{font-size:17px;margin:14px 0 6px;display:flex;align-items:center}
+  .panel h2 a{margin-left:auto;font-size:13px;font-weight:400;color:var(--pri)}
+  .row{display:flex;gap:10px;align-items:baseline;padding:10px 0;border-bottom:1px solid var(--line)}
+  .row:last-child{border-bottom:0}
+  .row .t{flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+  .row:hover .t{color:var(--pri)}
+  .row small{color:var(--mute);white-space:nowrap;font-size:12.5px}
+  .post .t{white-space:normal;font-weight:600}
+  .post p{margin:2px 0 0;font-size:13.5px;color:var(--mute);font-weight:400}
+  .msg .t{white-space:normal}
+  .msg b{color:var(--pri);font-weight:600;margin-right:6px}
+  .empty{color:var(--mute);font-size:14px;padding:14px 0}
+  .side{display:flex;flex-direction:column;gap:18px}
+
+  footer{border-top:1px solid var(--line);padding:26px 0;font-size:13px;color:var(--mute)}
+  footer .wrap{display:flex;justify-content:space-between;flex-wrap:wrap;gap:12px}
+  footer a:hover{color:var(--pri)}
+
+  @media (max-width:760px){
+    nav{display:none}
+    .hero{padding:44px 0 36px}.hero h1{font-size:28px}.hero p{font-size:15px}
+    .cols{grid-template-columns:1fr}
+  }
+</style>
+</head>
+<body>
+
+<header>
+  <div class="wrap">
+    <a class="logo" href="/">我的站点</a>
+    <nav>
+      <a href="/docs/">博客</a>
+      <a href="/files.html">文件</a>
+      <a href="/player.html">播放器</a>
+      <a href="/board.html">留言</a>
+      <a href="/chat.html">聊天</a>
+      <a href="/about.html">关于</a>
+    </nav>
+  </div>
+</header>
+
+<main class="wrap">
+  <section class="hero">
+    <h1>欢迎来到我的站点</h1>
+    <p>写写文章，存存文件，看看视频，听听音乐，也欢迎留下几句话。</p>
+    <div class="stats">
+      <div><b id="nPosts">–</b><span>篇文章</span></div>
+      <div><b id="nFiles">–</b><span>个文件</span></div>
+      <div><b id="nMsgs">–</b><span>条留言</span></div>
+    </div>
+  </section>
+
+  <section class="grid">
+    <a class="item" href="/docs/" style="--c:var(--c1)">
+      <div class="ico"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 20h9"/><path d="M16.5 3.5a2.1 2.1 0 0 1 3 3L7 19l-4 1 1-4z"/></svg></div>
+      <h3>博客</h3><p>文章、笔记与项目记录，支持图文和视频。</p>
+    </a>
+    <a class="item" href="/files.html" style="--c:var(--c2)">
+      <div class="ico"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z"/></svg></div>
+      <h3>文件</h3><p>分文件夹上传下载，PDF、Office、图片在线预览。</p>
+    </a>
+    <a class="item" href="/player.html" style="--c:var(--c3)">
+      <div class="ico"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="2" y="4" width="20" height="16" rx="2"/><path d="m10 9 5 3-5 3z"/></svg></div>
+      <h3>播放器</h3><p>按文件夹连播音乐和视频，支持音视频双轨。</p>
+    </a>
+    <a class="item" href="/board.html" style="--c:var(--c4)">
+      <div class="ico"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/></svg></div>
+      <h3>留言本</h3><p>公开留言，或给站长发一句悄悄话。</p>
+    </a>
+    <a class="item" href="/chat.html" style="--c:var(--pri)">
+      <div class="ico"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M7 8h10M7 12h6"/><path d="M21 12a8 8 0 0 1-11.8 7L3 21l2-5.5A8 8 0 1 1 21 12z"/></svg></div>
+      <h3>聊天室</h3><p>填个昵称就能进，和在线的人实时聊天。</p>
+    </a>
+    <a class="item" href="/about.html" style="--c:var(--c5)">
+      <div class="ico"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="8" r="4"/><path d="M4 21a8 8 0 0 1 16 0"/></svg></div>
+      <h3>关于</h3><p>这个站点和我。</p>
+    </a>
+  </section>
+
+  <section class="cols">
+    <div class="panel">
+      <h2>📝 最新文章 <a href="/docs/">全部 →</a></h2>
+      <div id="posts"><div class="empty">加载中…</div></div>
+    </div>
+    <div class="side">
+      <div class="panel">
+        <h2>📁 最近上传 <a href="/files.html">全部 →</a></h2>
+        <div id="files"><div class="empty">加载中…</div></div>
+      </div>
+      <div class="panel">
+        <h2>💬 最新留言 <a href="/board.html">去留言 →</a></h2>
+        <div id="msgs"><div class="empty">加载中…</div></div>
+      </div>
+    </div>
+  </section>
+</main>
+
+<footer>
+  <div class="wrap">
+    <span>© <span id="y"></span> 我的站点 · 由 GitHub + Cloudflare 驱动</span>
+    <span><a href="/docs/">博客</a> · <a href="/files.html">文件</a> · <a href="/board.html">留言</a></span>
+  </div>
+</footer>
+
+<script>
+const $ = id => document.getElementById(id);
+const esc = s => String(s ?? '').replace(/[&<>"]/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));
+const ago = t => { const s = (Date.now() - t) / 1000;
+  return s < 60 ? '刚刚' : s < 3600 ? Math.floor(s / 60) + ' 分钟前' : s < 86400 ? Math.floor(s / 3600) + ' 小时前'
+    : s < 86400 * 30 ? Math.floor(s / 86400) + ' 天前' : new Date(t).toLocaleDateString('zh-CN'); };
+const fmtS = n => n < 1048576 ? (n / 1024).toFixed(0) + ' KB' : n < 1073741824 ? (n / 1048576).toFixed(1) + ' MB' : (n / 1073741824).toFixed(2) + ' GB';
+const get = p => fetch(p).then(r => r.ok ? r.json() : Promise.reject(r.status));
+$('y').textContent = new Date().getFullYear();
+
+// 最新文章
+get('/api/posts').then(list => {
+  $('nPosts').textContent = list.length;
+  $('posts').innerHTML = list.length ? list.slice(0, 5).map(p => `
+    <a class="row post" href="/docs/?p=${encodeURIComponent(p.slug)}">
+      <div class="t">${esc(p.title)}${p.summary ? `<p>${esc(p.summary.slice(0, 60))}…</p>` : ''}</div>
+      <small>${ago(p.time)}</small></a>`).join('') : '<div class="empty">还没有文章</div>';
+}).catch(() => { $('posts').innerHTML = '<div class="empty">暂时无法加载</div>'; });
+
+// 最近上传：根目录 + 各文件夹合在一起取最新 5 个（不含博客配图）
+(async () => {
+  try {
+    const folders = await get('/api/folders').catch(() => []);
+    const lists = await Promise.all(['', ...folders.map(f => f.name).filter(n => n !== 'blog')]
+      .map(d => get('/api/files?folder=' + encodeURIComponent(d)).then(l => l.map(f => ({ ...f, folder: d }))).catch(() => [])));
+    const all = lists.flat().sort((a, b) => (b.time || 0) - (a.time || 0));
+    $('nFiles').textContent = all.length;
+    $('files').innerHTML = all.length ? all.slice(0, 5).map(f => `
+      <a class="row" href="/files.html${f.folder ? '#/' + encodeURIComponent(f.folder) : ''}">
+        <span class="t">${esc(f.name)}</span><small>${fmtS(f.size || 0)} · ${ago(f.time)}</small></a>`).join('')
+      : '<div class="empty">还没有文件</div>';
+  } catch (e) { $('files').innerHTML = '<div class="empty">暂时无法加载</div>'; }
+})();
+
+// 最新留言
+get('/api/messages').then(list => {
+  $('nMsgs').textContent = list.length;
+  $('msgs').innerHTML = list.length ? list.slice(0, 4).map(m => `
+    <a class="row msg" href="/board.html"><span class="t"><b>${esc(m.name)}</b>${esc(m.text.slice(0, 50))}${m.text.length > 50 ? '…' : ''}</span>
+      <small>${ago(m.time)}</small></a>`).join('') : '<div class="empty">还没有留言，来做第一个吧</div>';
+}).catch(() => { $('msgs').innerHTML = '<div class="empty">暂时无法加载</div>'; });
+</script>
+</body>
+</html>

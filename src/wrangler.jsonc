@@ -1,0 +1,29 @@
+{
+  "name": "my-repo-liuyanben",
+  "main": "src/worker.js",
+  "compatibility_date": "2025-01-01",
+  "assets": {
+    "directory": ".",
+    "binding": "ASSETS",
+    "run_worker_first": ["/api/*"]
+  },
+  "kv_namespaces": [
+    // 在 Cloudflare 后台 存储和数据库 → Workers KV 新建命名空间，把 ID 填到这里
+    { "binding": "KV", "id": "109275ade98a49afbeb6fafbed370ac2" }
+  ],
+  // 文件存 R2：先在 Cloudflare 后台 R2 里建好名为 board-files 的存储桶
+  // 不想用 R2 就删掉这一段，文件会退回存 KV（上限 20MB）
+  "r2_buckets": [
+    { "binding": "R2", "bucket_name": "board-files" }
+  ],
+  // 实时聊天室：每个房间一个 Durable Object（SQLite 版，免费套餐可用），部署时自动创建
+  "durable_objects": {
+    "bindings": [{ "name": "CHAT", "class_name": "ChatRoom" }]
+  },
+  "migrations": [
+    { "tag": "v1", "new_sqlite_classes": ["ChatRoom"] }
+  ],
+  "observability": { "enabled": true },
+  // 部署时保留在 Cloudflare 后台手动添加的变量，不被这份配置清掉
+  "keep_vars": true
+}
