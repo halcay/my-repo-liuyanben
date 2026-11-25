@@ -63,6 +63,7 @@
 <header>
   <h1>📁 文件</h1>
   <a href="/">首页</a>
+  <a href="/player.html" onclick="this.href='/player.html?folder='+encodeURIComponent(curDir())">播放器</a>
   <a href="#" id="adminBtn">管理</a>
 </header>
 <main>
@@ -76,6 +77,7 @@
     <input id="fi" type="file" multiple hidden>
     <input id="fd" type="file" webkitdirectory multiple hidden>
     <progress id="prog" max="100" value="0" hidden style="width:100%;height:10px;margin-top:10px"></progress>
+    <button id="cancelUp" hidden style="margin-top:6px;padding:4px 14px;border:0;border-radius:6px;background:#dc2626;color:#fff;cursor:pointer">取消上传</button>
     <div id="status"></div>
     <div id="dirs" class="dirs"></div>
     <div id="files"></div>
@@ -214,9 +216,20 @@ async function loadFiles() {
 }
 
 // 用 XHR 发送，才能拿到实时上传进度（fetch 拿不到）
+// 取消上传：中断当前请求，并让后续文件都不再上传
+let curXhr = null, cancelled = false;
+class Cancelled extends Error { constructor() { super('已取消'); } }
+$('cancelUp').onclick = () => {
+  if (!confirm('取消上传？已传完的文件会保留，正在传的这个会作废。')) return;
+  cancelled = true;
+  if (curXhr) curXhr.abort();
+};
 function xhrSend(method, path, body, onProg) {
   return new Promise((res, rej) => {
+    if (cancelled) return rej(new Cancelled());
     const x = new XMLHttpRequest();
+    curXhr = x;
+    x.onabort = () => rej(new Cancelled());
     x.open(method, path);
     if (adminKey) x.setRequestHeader('x-admin-key', adminKey);
     x.upload.onprogress = e => onProg && onProg(e.loaded);
@@ -254,7 +267,7 @@ async function uploadBig(f, folder, label) {
             loaded => showProg(label, f.name, i * CHUNK + loaded, f.size, t0)));
           break;
         }
-        catch (e) { if (tryN >= 3) throw e; $('status').textContent += `（第 ${i + 1} 片失败，重试 ${tryN}）`; await new Promise(r => setTimeout(r, 1500 * tryN)); }
+        catch (e) { if (tryN >= 3 || e instanceof Cancelled) throw e; $('status').textContent += `（第 ${i + 1} 片失败，重试 ${tryN}）`; await new Promise(r => setTimeout(r, 1500 * tryN)); }
       }
     }
     $('status').textContent = `${label}${f.name}：正在合并文件…`;
@@ -269,7 +282,10 @@ async function uploadBig(f, folder, label) {
 async function upload(items) {
   items = items.filter(it => !/^\./.test(it.file.name));   // 跳过 .DS_Store 这类隐藏文件
   let ok = 0, n = 0;
+  cancelled = false;
+  $('cancelUp').hidden = false;
   for (const { file: f, folder } of items) {
+    if (cancelled) break;
     n++;
     const label = items.length > 1 ? `上传中（${n}/${items.length}）` : '上传中：';
     if (f.size > maxFile) {
@@ -287,6 +303,9 @@ async function upload(items) {
     catch (e) { $('status').textContent = `✘ ${f.name}：${e.message}`; }
   }
   $('prog').hidden = true;
+  $('cancelUp').hidden = true;
+  curXhr = null;
+  if (cancelled) { $('status').textContent = `⏹ 已取消上传（完成 ${ok} 个，共 ${items.length} 个）`; reload(); return; }
   if (items.length && ok === items.length) $('status').textContent = `✔ 已上传 ${ok} 个文件`;
   else if (items.length > 1) $('status').textContent = `已上传 ${ok}/${items.length} 个，失败 ${items.length - ok} 个。最后一个错误：${$('status').textContent.replace(/^✘ /, '')}`;
   reload();

@@ -3,109 +3,239 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>视频播放</title>
+<title>双轨播放</title>
 <style>
   * { box-sizing: border-box; margin: 0; padding: 0; }
-  body {
-    font-family: -apple-system, "PingFang SC", "Microsoft YaHei", sans-serif;
-    background: #111;
-    color: #eee;
-    min-height: 100vh;
-    display: flex;
-    flex-direction: column;
-    align-items: center;
-    padding: 24px 16px;
-  }
-  h1 { font-size: 20px; font-weight: 600; margin-bottom: 16px; }
-  .wrap { width: 100%; max-width: 960px; }
-  video {
-    width: 100%;
-    background: #000;
-    border-radius: 8px;
-    display: block;
-  }
+  body { font-family: -apple-system, "PingFang SC", "Microsoft YaHei", sans-serif; background: #111; color: #eee;
+    min-height: 100vh; padding: 24px 16px; }
+  .wrap { max-width: 960px; margin: 0 auto; }
+  h1 { font-size: 20px; font-weight: 600; margin-bottom: 16px; display: flex; gap: 12px; align-items: center; }
+  h1 a { font-size: 14px; color: #60a5fa; font-weight: 400; margin-left: auto; }
+  video { width: 100%; background: #000; border-radius: 8px; display: block; }
+  .pick { display: grid; grid-template-columns: auto 1fr; gap: 8px 10px; align-items: center; margin-bottom: 14px; }
+  .pick label { font-size: 14px; color: #aaa; }
+  select, input { width: 100%; padding: 9px 10px; border-radius: 6px; border: 1px solid #333; background: #1c1c1c; color: #eee; font-size: 14px; }
+  .row { display: flex; gap: 8px; margin-top: 8px; grid-column: 1 / -1; flex-wrap: wrap; }
+  button { padding: 9px 18px; border: none; border-radius: 6px; background: #3b82f6; color: #fff; font-size: 14px; cursor: pointer; }
+  button.gray { background: #374151; }
   .status { margin-top: 10px; font-size: 13px; color: #999; min-height: 18px; }
   .status.error { color: #ff6b6b; }
-  .bar { display: flex; gap: 8px; margin-top: 16px; }
-  .bar input {
-    flex: 1;
-    padding: 10px 12px;
-    border-radius: 6px;
-    border: 1px solid #333;
-    background: #1c1c1c;
-    color: #eee;
-    font-size: 14px;
-  }
-  .bar button {
-    padding: 10px 18px;
-    border: none;
-    border-radius: 6px;
-    background: #3b82f6;
-    color: #fff;
-    font-size: 14px;
-    cursor: pointer;
-  }
-  .bar button:hover { background: #2563eb; }
+  .tune { display: flex; gap: 10px; align-items: center; margin-top: 10px; font-size: 13px; color: #aaa; flex-wrap: wrap; }
+  .tune input[type=range] { width: 160px; padding: 0; }
+  video.music { height: 54px; background: #1c1c1c; }
+  #nowTitle { padding: 18px 14px; margin-bottom: 8px; border-radius: 8px; font-size: 18px; word-break: break-all;
+    background: linear-gradient(135deg, #1e3a8a, #6d28d9); }
+  #plist { list-style: none; margin-top: 12px; border: 1px solid #262626; border-radius: 8px; max-height: 340px; overflow: auto; }
+  #plist:empty { display: none; }
+  #plist li { padding: 9px 12px; border-bottom: 1px solid #1f1f1f; cursor: pointer; display: flex; gap: 10px; font-size: 14px; word-break: break-all; }
+  #plist li:hover { background: #1a1a1a; }
+  #plist li.on { background: #1e3a8a; color: #fff; }
+  #plist li small { color: #777; margin-left: auto; white-space: nowrap; }
+  @media (max-width: 520px) { .pick { grid-template-columns: 1fr; } }
 </style>
 </head>
 <body>
-  <div class="wrap">
-    <h1 id="title">视频播放</h1>
+<div class="wrap">
+  <h1>🎬 双轨播放 <a href="/files.html">← 文件</a></h1>
 
-    <video id="player" controls playsinline preload="metadata"></video>
-    <div id="status" class="status"></div>
-
-    <!-- 测试用：粘贴其他视频网址播放。正式上线不需要可以删掉这一段 -->
-    <div class="bar">
-      <input id="urlInput" type="text" placeholder="粘贴视频网址，例如 https://pub-xxxx.r2.dev/video.webm">
-      <button id="loadBtn">播放</button>
+  <div class="pick">
+    <label for="dirSel">播放列表</label>
+    <div style="display:flex;gap:8px">
+      <select id="dirSel"></select>
+      <label style="white-space:nowrap;display:flex;align-items:center;gap:4px;color:#aaa;font-size:13px">
+        <input id="autoNext" type="checkbox" checked style="width:auto"> 连播</label>
+      <label style="white-space:nowrap;display:flex;align-items:center;gap:4px;color:#aaa;font-size:13px">
+        <input id="shuffle" type="checkbox" style="width:auto"> 随机</label>
+    </div>
+    <label for="vSel">视频轨</label><select id="vSel"></select>
+    <label for="aSel">音频轨</label><select id="aSel"></select>
+    <div class="row">
+      <button id="playBtn">载入播放</button>
+      <button id="swapBtn" class="gray" title="选反了就点这个">⇄ 交换</button>
+      <button id="linkBtn" class="gray">复制分享链接</button>
     </div>
   </div>
 
+  <div id="nowTitle" hidden></div>
+  <video id="v" controls playsinline preload="metadata"></video>
+  <audio id="a" preload="auto"></audio>
+  <div id="status" class="status"></div>
+
+  <div class="row" style="margin-top:10px">
+    <button class="gray" id="prevBtn">⏮ 上一个</button>
+    <button class="gray" id="nextBtn">下一个 ⏭</button>
+  </div>
+  <ol id="plist"></ol>
+
+  <div class="tune">
+    音画偏移
+    <input id="offset" type="range" min="-2" max="2" step="0.05" value="0">
+    <span id="offVal">0.00 秒</span>
+    <button class="gray" id="offReset" style="padding:4px 10px">归零</button>
+    <span style="color:#666">（声音早了往右拖，晚了往左拖）</span>
+  </div>
+</div>
+
 <script>
-  // ===== 在这里改成你的视频网址 =====
-  const VIDEO_URL = "https://pub-xxxx.r2.dev/video.webm";
-  const VIDEO_TITLE = "视频播放";
-  // ==================================
+const $ = id => document.getElementById(id);
+const v = $('v'), a = $('a');
+const setStatus = (t, err) => { $('status').textContent = t; $('status').className = 'status' + (err ? ' error' : ''); };
+// 文件 ID 或完整网址都可以
+const srcOf = x => /^https?:|^\//.test(x) ? x : `/api/files/${encodeURIComponent(x)}?view=1`;
+const qs = new URLSearchParams(location.search);
+let offset = Number(qs.get('off')) || 0;
 
-  const player = document.getElementById("player");
-  const statusEl = document.getElementById("status");
-  const urlInput = document.getElementById("urlInput");
-  document.getElementById("title").textContent = VIDEO_TITLE;
-  document.title = VIDEO_TITLE;
+// ---------- 读取全部文件（根目录 + 各文件夹），只留音视频 ----------
+async function getJSON(p) { const r = await fetch(p); if (!r.ok) throw new Error(r.status); return r.json(); }
+async function loadList() {
+  const all = [];
+  try {
+    const folders = await getJSON('/api/folders').catch(() => []);
+    $('dirSel').innerHTML = '<option value="-">（不使用列表）</option><option value="">根目录</option>' +
+      folders.map(f => `<option value="${encodeURIComponent(f.name)}">📁 ${f.name.replace(/</g, '&lt;')}</option>`).join('');
+    const lists = await Promise.all(['', ...folders.map(f => f.name)].map(d =>
+      getJSON('/api/files?folder=' + encodeURIComponent(d)).then(l => l.map(f => ({ ...f, folder: d }))).catch(() => [])));
+    lists.flat().forEach(f => { if (/^(video|audio)\//.test(f.type || '') || /\.(webm|mp4|m4v|mov|ogv|mp3|m4a|aac|ogg|opus|wav|flac)$/i.test(f.name)) all.push(f); });
+  } catch (e) { setStatus('读取文件列表失败：' + e.message, true); }
+  all.sort((x, y) => x.name.localeCompare(y.name));
+  const opts = '<option value="">（不选）</option>' + all.map(f =>
+    `<option value="${encodeURIComponent(f.id)}">${f.folder ? f.folder + ' / ' : ''}${f.name.replace(/</g, '&lt;')}</option>`).join('');
+  $('vSel').innerHTML = opts; $('aSel').innerHTML = opts;
+  return all;
+}
 
-  function setStatus(text, isError) {
-    statusEl.textContent = text;
-    statusEl.className = "status" + (isError ? " error" : "");
+// ---------- 同步：视频为主，音频跟随 ----------
+let syncing = false;
+const target = () => v.currentTime + offset;
+function hardSync() { if (a.src && Math.abs(a.currentTime - target()) > 0.05) a.currentTime = Math.max(0, target()); }
+v.addEventListener('play', () => { if (!a.src) return; hardSync(); a.play().catch(() => setStatus('浏览器拦截了自动播放声音，请再点一次播放', true)); });
+v.addEventListener('pause', () => a.pause());
+v.addEventListener('seeking', () => { if (a.src) { a.pause(); hardSync(); } });
+v.addEventListener('seeked', () => { if (a.src && !v.paused) a.play().catch(() => {}); });
+v.addEventListener('waiting', () => { a.pause(); setStatus('缓冲中…'); });
+v.addEventListener('playing', () => { setStatus(''); if (a.src) { hardSync(); a.play().catch(() => {}); } });
+v.addEventListener('ratechange', () => a.playbackRate = v.playbackRate);
+v.addEventListener('ended', () => a.pause());
+// 视频的音量/静音按钮控制音频轨
+v.addEventListener('volumechange', () => { if (!a.src) return; a.volume = v.volume; a.muted = v.muted; });
+// 音频卡住时让视频等一等
+a.addEventListener('waiting', () => { if (!v.paused) { syncing = true; v.pause(); setStatus('音频缓冲中…'); } });
+a.addEventListener('canplay', () => { if (syncing) { syncing = false; v.play(); } });
+// 播放中每 0.5 秒校正一次漂移：小偏差微调速度，大偏差直接跳
+setInterval(() => {
+  if (!a.src || v.paused || a.paused) return;
+  const d = a.currentTime - target();
+  if (Math.abs(d) > 0.3) { a.currentTime = target(); a.playbackRate = v.playbackRate; }
+  else if (Math.abs(d) > 0.04) a.playbackRate = v.playbackRate * (d > 0 ? 0.97 : 1.03);
+  else a.playbackRate = v.playbackRate;
+}, 500);
+
+v.addEventListener('error', () => setStatus('视频轨加载失败：格式不支持或文件不存在', true));
+a.addEventListener('error', () => { if (a.src) setStatus('音频轨加载失败：格式不支持或文件不存在', true); });
+
+// ---------- 载入 ----------
+function load(vid, aud) {
+  if (!vid) return setStatus('请先选视频轨', true);
+  setStatus('加载中…');
+  v.src = srcOf(vid);
+  if (aud) { a.src = srcOf(aud); v.muted = false; } else { a.removeAttribute('src'); a.load(); }
+  v.load();
+  const name = $('vSel').selectedOptions[0]?.textContent || '双轨播放';
+  document.title = name;
+}
+const decodeSel = s => s ? decodeURIComponent(s) : '';
+$('playBtn').onclick = () => {
+  cur = -1; renderList();
+  v.classList.remove('music'); $('nowTitle').hidden = true;
+  load(decodeSel($('vSel').value), decodeSel($('aSel').value));
+};
+$('swapBtn').onclick = () => { const t = $('vSel').value; $('vSel').value = $('aSel').value; $('aSel').value = t; $('playBtn').click(); };
+$('linkBtn').onclick = async () => {
+  const u = new URL(location.href.split('?')[0]);
+  if ($('vSel').value) u.searchParams.set('v', decodeSel($('vSel').value));
+  if ($('aSel').value) u.searchParams.set('a', decodeSel($('aSel').value));
+  if (offset) u.searchParams.set('off', offset.toFixed(2));
+  try { await navigator.clipboard.writeText(u.href); setStatus('已复制：' + u.href); } catch (e) { prompt('复制这个链接：', u.href); }
+};
+
+// 偏移
+const showOff = () => { $('offset').value = offset; $('offVal').textContent = (offset >= 0 ? '+' : '') + offset.toFixed(2) + ' 秒'; };
+$('offset').oninput = e => { offset = Number(e.target.value); showOff(); hardSync(); };
+$('offReset').onclick = () => { offset = 0; showOff(); hardSync(); };
+showOff();
+
+// ---------- 播放列表：从指定文件夹加载，点哪个播哪个，播完自动下一个 ----------
+let allFiles = [], plist = [], cur = -1;
+const isAudio = f => /^audio\//.test(f.type || '') || /\.(mp3|m4a|aac|ogg|opus|wav|flac)$/i.test(f.name);
+const fmtS = n => n < 1048576 ? (n / 1024).toFixed(0) + ' KB' : (n / 1048576).toFixed(1) + ' MB';
+function renderList() {
+  $('plist').innerHTML = plist.map((f, i) =>
+    `<li data-i="${i}" class="${i === cur ? 'on' : ''}">${/^audio\//.test(f.type || '') || /\.(mp3|m4a|aac|ogg|opus|wav|flac)$/i.test(f.name) ? '🎵' : '🎬'}
+      <span>${f.name.replace(/</g, '&lt;')}</span><small>${fmtS(f.size || 0)}</small></li>`).join('');
+  $('plist').querySelectorAll('li').forEach(li => li.onclick = () => playAt(Number(li.dataset.i)));
+  $('plist').querySelector('li.on')?.scrollIntoView({ block: 'nearest' });
+}
+function setFolder(val) {
+  const u = new URL(location.href);
+  if (val === '-') { plist = []; cur = -1; renderList(); u.searchParams.delete('folder'); history.replaceState(null, '', u); return; }
+  const d = decodeSel(val);
+  plist = allFiles.filter(f => (f.folder || '') === d);
+  cur = -1; renderList();
+  u.searchParams.set('folder', d); history.replaceState(null, '', u);
+  setStatus(plist.length ? `${d || '根目录'}：${plist.length} 个音视频，点一个开始播放` : `${d || '根目录'} 里没有音视频文件`);
+}
+function playAt(i) {
+  if (!plist.length) return;
+  cur = (i + plist.length) % plist.length;
+  const f = plist[cur];
+  $('vSel').value = encodeURIComponent(f.id); $('aSel').value = '';
+  load(f.id, '');
+  // 音乐：播放器缩成一条，上方显示曲名；视频：正常画面
+  const music = isAudio(f);
+  v.classList.toggle('music', music);
+  $('nowTitle').hidden = !music; $('nowTitle').textContent = '🎵 ' + f.name.replace(/\.[^.]+$/, '');
+  v.play().catch(() => {});
+  renderList();
+  document.title = f.name;
+  // 手机锁屏 / 耳机按键：显示曲名，支持上一首下一首
+  if ('mediaSession' in navigator) {
+    navigator.mediaSession.metadata = new MediaMetadata({ title: f.name.replace(/\.[^.]+$/, ''), album: f.folder || '根目录' });
+    navigator.mediaSession.setActionHandler('previoustrack', () => next(-1));
+    navigator.mediaSession.setActionHandler('nexttrack', () => next(1));
   }
+}
+function next(step = 1) {
+  if (!plist.length) return;
+  if ($('shuffle').checked && plist.length > 1) { let j; do j = Math.floor(Math.random() * plist.length); while (j === cur); playAt(j); }
+  else playAt(cur + step);
+}
+$('dirSel').onchange = e => setFolder(e.target.value);
+$('nextBtn').onclick = () => next(1);
+$('prevBtn').onclick = () => next(-1);
+v.addEventListener('ended', () => { if (plist.length && cur >= 0 && $('autoNext').checked) next(1); });
 
-  function load(url) {
-    if (!url) return;
-    setStatus("加载中…");
-    player.src = url;
-    player.load();
-    urlInput.value = url;
+// ---------- 启动：网址参数 ?v=视频ID&a=音频ID 优先；否则按文件名自动配一对 ----------
+(async () => {
+  const files = allFiles = await loadList();
+  // ?folder=文件夹名：直接载入该文件夹的播放列表（根目录用 ?folder=）
+  if (qs.has('folder')) {
+    const val = encodeURIComponent(qs.get('folder'));
+    if ([...$('dirSel').options].some(o => o.value === val)) {
+      $('dirSel').value = val; setFolder(val);
+      if (!qs.get('v') && plist.length) { playAt(0); return; }
+    } else setStatus(`找不到文件夹：${qs.get('folder')}`, true);
+  } else $('dirSel').value = '-';
+  const pick = (sel, id) => { const o = [...sel.options].find(o => decodeSel(o.value) === id); if (o) sel.value = o.value; };
+  let vid = qs.get('v'), aud = qs.get('a');
+  if (!vid) {
+    // 默认这一对：按文件名匹配
+    const byName = n => files.find(f => f.name === n || f.id === n);
+    const f1 = byName('video_1789908985944.webm'), f2 = byName('video_1789909036631.webm');
+    if (f1 && f2) { vid = f1.id; aud = f2.id; }
   }
-
-  player.addEventListener("loadedmetadata", () => setStatus("已就绪，点击播放"));
-  player.addEventListener("waiting", () => setStatus("缓冲中…"));
-  player.addEventListener("playing", () => setStatus(""));
-  player.addEventListener("error", () => {
-    const isWebm = /\.webm(\?|$)/i.test(player.src);
-    const isApple = /iPhone|iPad|Macintosh/.test(navigator.userAgent) && "ontouchend" in document;
-    if (isWebm && isApple) {
-      setStatus("这台设备可能不支持 WebM 格式，请换 MP4 版本或用安卓手机、电脑观看。", true);
-    } else {
-      setStatus("视频加载失败：请检查网址是否正确、R2 是否已开启公开访问。", true);
-    }
-  });
-
-  document.getElementById("loadBtn").addEventListener("click", () => load(urlInput.value.trim()));
-  urlInput.addEventListener("keydown", e => { if (e.key === "Enter") load(urlInput.value.trim()); });
-
-  // 支持网址参数：player.html?v=视频网址
-  const fromQuery = new URLSearchParams(location.search).get("v");
-  load(fromQuery || VIDEO_URL);
+  if (vid) { pick($('vSel'), vid); if (aud) pick($('aSel'), aud); load(vid, aud); }
+  else setStatus('选择视频轨和音频轨，然后点“载入播放”');
+})();
 </script>
 </body>
 </html>
