@@ -127,12 +127,14 @@ async function uploadFiles(list) {
     try {
       const fd = new FormData(); fd.append('file', f); fd.append('folder', 'blog');
       const r = await api('/api/files', { method: 'POST', body: fd });
-      const url = `/api/files/${encodeURIComponent(r.id)}?view=1`;
+      // 括号也要转义，否则文件名带 ( ) 会弄坏 Markdown 链接
+      const enc = s => encodeURIComponent(s).replace(/[()]/g, c => '%' + c.charCodeAt(0).toString(16).toUpperCase());
+      const url = `/api/files/${enc(r.id)}?view=1`;
       const t = f.type || '';
       const mdText = t.startsWith('image/') ? `![${f.name}](${url})`
         : t.startsWith('video/') ? `<video src="${url}" controls playsinline></video>`
         : t.startsWith('audio/') ? `<audio src="${url}" controls></audio>`
-        : `[📎 ${f.name}](/api/files/${encodeURIComponent(r.id)})`;
+        : `[📎 ${f.name.replace(/[\[\]]/g, '')}](/api/files/${enc(r.id)})`;
       $('content').value = $('content').value.replace(ph, mdText);
       st(`✔ 已上传 ${f.name}`);
     } catch (e) {

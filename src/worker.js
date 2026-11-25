@@ -101,6 +101,28 @@ export class ChatRoom extends DurableObject {
   }
 }
 
+// R2 对象名：文件夹/编号_文件名（在 R2 后台能直接看到文件名和文件夹）
+// 编号保证同名文件不会互相覆盖；文件名里的斜杠等去掉
+const r2Key = (folder, id, name) => {
+  const safe = String(name || 'file').replace(/[\\/\x00-\x1f#?]/g, '_').slice(0, 150);
+  return (folder ? folder + '/' : '') + id + '_' + safe;
+};
+// ---------- 隐藏 ----------
+// KV 键 hidden:<文件ID> / hiddendir:<文件夹名>。隐藏后：访客看不到，也下载不了；管理员照常
+// 每次下载都要查，所以在内存里缓存 20 秒，避免视频拖动时大量读 KV
+let hiddenCache = null, hiddenAt = 0;
+async function getHidden(env, fresh) {
+  if (!fresh && hiddenCache && Date.now() - hiddenAt < 20000) return hiddenCache;
+  const [f, d] = await Promise.all([listAll(env.KV, 'hidden:', 1000), listAll(env.KV, 'hiddendir:', 1000)]);
+  hiddenCache = { files: new Set(f.map(k => k.name.slice(7))), dirs: new Set(d.map(k => k.name.slice(10))) };
+  hiddenAt = Date.now();
+  return hiddenCache;
+}
+const isHidden = (h, id, folder) => h.files.has(id) || (!!folder && h.dirs.has(folder));
+
+// 文件 ID（= R2 对象名）合法性：不能为空、不能有 .. 路径
+const okId = id => !!id && id.length <= 400 && !id.split('/').includes('..');
+
 // 文件夹名：去掉斜杠和首尾空格，最长 40 字；空字符串 = 根目录
 const cleanFolder = v => String(v || '').replace(/[\\/]/g, '').trim().slice(0, 40);
 
@@ -112,7 +134,7 @@ async function listFiles(env, useR2) {
     do {
       const r = await env.R2.list({ limit: 1000, cursor, include: ['customMetadata', 'httpMetadata'] });
       for (const o of r.objects) out.push({ id: o.key, name: o.customMetadata?.name || o.key.split('/').pop(), size: o.size,
-        type: o.customMetadata?.type || o.httpMetadata?.contentType || mimeByName(o.key), folder: o.customMetadata?.folder || '',
+        type: o.customMetadata?.type || o.httpMetadata?.contentType || mimeByName(o.key), folder: o.customMetadata?.folder ?? (o.key.includes('/') ? cleanFolder(o.key.split('/')[0]) : ''),
         time: Number(o.customMetadata?.time) || o.uploaded.getTime() });
       cursor = r.truncated ? r.cursor : null;
     } while (cursor && out.length < 10000);
@@ -239,16 +261,16 @@ export default {
           const b = await req.json().catch(() => ({}));
           const size = Number(b.size) || 0;
           if (size > MAX_BIG) return json({ error: `文件超过 ${MAX_BIG / 1073741824}GB` }, 413);
-          const id = Date.now().toString(36) + rid();
           const folder = cleanFolder(b.folder);
-          const type = String(b.type || 'application/octet-stream').slice(0, 100);
-          const name = String(b.name || id).split(/[\\/]/).pop().slice(0, 200);
+          const name = String(b.name || 'file').split(/[\\/]/).pop().slice(0, 200);
+          const type = String(b.type || mimeByName(name) || 'application/octet-stream').slice(0, 100);
+          const id = r2Key(folder, Date.now().toString(36) + rid(), name);
           const mpu = await env.R2.createMultipartUpload(id, { httpMetadata: { contentType: type },
             customMetadata: { name, type, time: String(Date.now()), folder } });
           return json({ id, uploadId: mpu.uploadId, folder });
         }
         const id = url.searchParams.get('id') || '', uploadId = url.searchParams.get('uploadId') || '';
-        if (!/^\w+$/.test(id) || !uploadId) return json({ error: '参数错误' }, 400);
+        if (!okId(id) || !uploadId) return json({ error: '参数错误' }, 400);
         const mpu = env.R2.resumeMultipartUpload(id, uploadId);
         if (p === '/api/upload/part' && req.method === 'PUT') {
           const n = Number(url.searchParams.get('part'));
@@ -263,6 +285,7 @@ export default {
           const o = await mpu.complete(parts);
           const folder = cleanFolder(b.folder);
           if (folder && !(await env.KV.get('dir:' + folder))) await env.KV.put('dir:' + folder, '1');
+          if (b.hidden) { await env.KV.put('hidden:' + id, '1'); hiddenCache = null; }
           return json({ ok: true, id, size: o.size });
         }
         if (p === '/api/upload/abort' && req.method === 'POST') {
@@ -274,21 +297,39 @@ export default {
 
       if (p === '/api/files' && req.method === 'GET') {
         const folder = cleanFolder(url.searchParams.get('folder'));
-        const files = (await listFiles(env, useR2)).filter(f => (f.folder || '') === folder);
+        const admin = isAdmin(req, env), h = await getHidden(env, admin);
+        if (!admin && folder && h.dirs.has(folder)) return json([]);
+        const files = (await listFiles(env, useR2)).filter(f => (f.folder || '') === folder)
+          .map(f => ({ ...f, hidden: h.files.has(f.id) }))
+          .filter(f => admin || !f.hidden);
         files.sort((a, b) => (b.time || 0) - (a.time || 0));
         return json(files);
+      }
+
+      // ---------- 隐藏 / 取消隐藏（管理员）----------
+      if (p === '/api/hide' && req.method === 'POST') {
+        if (!isAdmin(req, env)) return json({ error: '管理密钥错误' }, 403);
+        const b = await req.json().catch(() => ({}));
+        const key = b.folder != null ? 'hiddendir:' + cleanFolder(b.folder) : 'hidden:' + String(b.id || '');
+        if (key === 'hidden:' || key === 'hiddendir:') return json({ error: '参数错误' }, 400);
+        if (b.hidden) await env.KV.put(key, '1'); else await env.KV.delete(key);
+        hiddenCache = null;
+        return json({ ok: true });
       }
 
       // ---------- 文件夹 ----------
       if (p === '/api/folders' && req.method === 'GET') {
         const files = await listFiles(env, useR2);
+        const admin = isAdmin(req, env), h = await getHidden(env, admin);
         const map = {};
         for (const k of await listAll(env.KV, 'dir:', 1000)) map[k.name.slice(4)] = { count: 0, size: 0 };
         for (const f of files) if (f.folder) {
+          if (!admin && h.files.has(f.id)) continue;   // 隐藏的文件不算进访客看到的数量
           const d = map[f.folder] || (map[f.folder] = { count: 0, size: 0 });
           d.count++; d.size += f.size || 0;
         }
-        const list = Object.entries(map).map(([name, d]) => ({ name, ...d }));
+        const list = Object.entries(map).map(([name, d]) => ({ name, ...d, hidden: h.dirs.has(name) }))
+          .filter(d => admin || !d.hidden);
         list.sort((a, b) => a.name.localeCompare(b.name, 'zh', { numeric: false }));
         return json(list);
       }
@@ -311,8 +352,10 @@ export default {
         const f = form.get('file');
         if (!f || typeof f === 'string') return json({ error: '没有文件' }, 400);
         if (f.size > maxFile) return json({ error: `文件超过 ${maxFile / 1048576}MB` }, 413);
-        const id = Date.now().toString(36) + rid();
         const folder = cleanFolder(form.get('folder'));
+        // R2 用“文件夹/编号_文件名”作对象名；KV 仍用短编号
+        const shortId = Date.now().toString(36) + rid();
+        const id = useR2 ? r2Key(folder, shortId, f.name.split(/[\\/]/).pop()) : shortId;
         const meta = { name: f.name.split(/[\\/]/).pop().slice(0, 200), size: f.size, type: f.type || mimeByName(f.name) || 'application/octet-stream', time: Date.now(), folder };
         if (useR2) {
           await env.R2.put(id, f, { httpMetadata: { contentType: meta.type },
@@ -322,6 +365,8 @@ export default {
         }
         // 记录文件夹（已存在就不重复写，节省 KV 写入次数）
         if (folder && !(await env.KV.get('dir:' + folder))) await env.KV.put('dir:' + folder, '1');
+        // 上传时勾了“隐藏”（只有管理员能设）
+        if (form.get('hidden') === '1' && isAdmin(req, env)) { await env.KV.put('hidden:' + id, '1'); hiddenCache = null; }
         return json({ ok: true, id, ...meta });
       }
       // 文件 ID 允许任意 R2 键（例如在 Cloudflare 后台直接上传的 “xxx.webm”、带中文/横杠的名字）
@@ -331,6 +376,17 @@ export default {
       if (m && req.method === 'GET') {
         // ?view=1：在浏览器里直接查看/播放；否则下载
         const view = url.searchParams.get('view') === '1';
+        // 隐藏的文件 / 隐藏文件夹里的文件：访客当作不存在
+        if (!isAdmin(req, env)) {
+          const h = await getHidden(env);
+          const keyFolder = m[1].includes('/') ? cleanFolder(m[1].split('/')[0]) : '';
+          if (h.files.has(m[1]) || (h.dirs.size && keyFolder && h.dirs.has(keyFolder))) return json({ error: '文件不存在' }, 404);
+          if (h.dirs.size && useR2 && !keyFolder) {
+            // 旧文件对象名里没有文件夹，要看元数据
+            const head = await env.R2.head(m[1]);
+            if (head && h.dirs.has(head.customMetadata?.folder || '')) return json({ error: '文件不存在' }, 404);
+          }
+        }
         let body, name, type, status = 200;
         const extra = {};
         if (useR2) {
@@ -373,6 +429,7 @@ export default {
       if (m && req.method === 'DELETE') {
         if (!isAdmin(req, env)) return json({ error: '管理密钥错误' }, 403);
         if (useR2) await env.R2.delete(m[1]); else await env.KV.delete('file:' + m[1]);
+        if ((await getHidden(env, true)).files.has(m[1])) { await env.KV.delete('hidden:' + m[1]); hiddenCache = null; }
         return json({ ok: true });
       }
 

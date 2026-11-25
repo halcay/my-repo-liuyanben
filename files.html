@@ -33,12 +33,14 @@
   #status{margin:10px 0;color:var(--mute);font-size:14px;min-height:20px}
   .empty{color:var(--mute);padding:16px 0;text-align:center}
   .view{border:1px solid var(--pri);background:none;color:var(--pri);border-radius:6px;padding:3px 10px;cursor:pointer;font-size:13px;white-space:nowrap}
-  #pv{position:fixed;inset:0;background:#000c;display:flex;flex-direction:column;align-items:center;justify-content:center;padding:16px;z-index:9}
+  #pv{position:fixed;inset:0;background:#000d;display:flex;flex-direction:column;align-items:center;justify-content:center;padding:10px;z-index:9}
   #pv[hidden]{display:none}
-  #pvBody{max-width:100%;max-height:85vh;display:flex;justify-content:center}
-  #pvBody img,#pvBody video{max-width:100%;max-height:85vh;border-radius:8px;background:#000}
+  #pvBody{width:100%;flex:1;min-height:0;display:flex;justify-content:center;align-items:center}
+  #pvBody img,#pvBody video{max-width:100%;max-height:100%;border-radius:8px;background:#000}
   #pvBody audio{width:min(90vw,520px)}
-  #pvBody iframe{width:min(92vw,900px);height:85vh;border:0;border-radius:8px;background:#fff}
+  /* 文档类撑满窗口 */
+  #pvBody iframe{width:100%;height:100%;border:0;border-radius:8px;background:#fff}
+  #pv:fullscreen{padding:0} #pv:fullscreen #pvBody img,#pv:fullscreen #pvBody video,#pv:fullscreen #pvBody iframe{border-radius:0}
   #pvBar{color:#fff;margin-top:10px;display:flex;gap:16px;align-items:center;font-size:14px;max-width:92vw}
   #pvBar span{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
   #pvBar a,#pvBar button{color:#93c5fd;background:none;border:0;cursor:pointer;font-size:14px;white-space:nowrap}
@@ -57,6 +59,13 @@
   .dir .ddel{position:absolute;top:8px;right:8px;display:none;border:0;background:none;color:var(--red);cursor:pointer;font-size:16px;line-height:1}
   body.admin .dir .ddel{display:block}
   .sub{font-size:13px;color:var(--mute);margin:18px 0 0}
+  /* 隐藏功能：只有管理员看得到这些控件 */
+  .adm{display:none!important} body.admin .adm{display:inline-flex!important}
+  .hid{font-size:11.5px;color:#b45309;border:1px solid #b45309;border-radius:4px;padding:0 5px;margin-left:6px;white-space:nowrap}
+  .file.is-hidden a,.dir.is-hidden .dn{opacity:.6}
+  .hbtn{border:0;background:none;color:var(--mute);cursor:pointer;font-size:13px;white-space:nowrap}
+  .dir .dhide{position:absolute;top:6px;left:8px;border:0;background:none;cursor:pointer;font-size:14px;padding:2px}
+  #hideUp{align-items:center;gap:5px;font-size:13.5px;color:var(--mute);margin-top:8px;cursor:pointer}
 </style>
 </head>
 <body>
@@ -74,6 +83,7 @@
       <button class="sbtn" id="upDir">上传文件夹</button>
     </div>
     <div id="drop">点击或拖拽文件到这里上传</div>
+    <label id="hideUp" class="adm"><input type="checkbox" id="hideChk" style="width:auto;margin:0"> 🙈 上传为隐藏文件（只有管理员能看到和下载）</label>
     <input id="fi" type="file" multiple hidden>
     <input id="fd" type="file" webkitdirectory multiple hidden>
     <progress id="prog" max="100" value="0" hidden style="width:100%;height:10px;margin-top:10px"></progress>
@@ -86,7 +96,10 @@
 
 <div id="pv" hidden>
   <div id="pvBody"></div>
-  <div id="pvBar"><span id="pvName"></span><a id="pvDl" download>下载</a><button id="pvClose">关闭 ✕</button></div>
+  <div id="pvBar"><span id="pvName"></span>
+    <button id="pvFull">⛶ 全屏</button>
+    <a id="pvNew" target="_blank" rel="noopener">↗ 新窗口打开</a>
+    <a id="pvDl" download>下载</a><button id="pvClose">关闭 ✕</button></div>
 </div>
 
 <script>
@@ -129,21 +142,27 @@ function kind(f) {
   if (t.startsWith('audio/') || /\.(mp3|wav|ogg|m4a|aac|flac)$/.test(n)) return 'audio';
   if (t === 'application/pdf' || n.endsWith('.pdf')) return 'pdf';
   if (t === 'text/plain' || /\.(txt|log|md|csv)$/.test(n)) return 'text';
-  if (/\.(docx?|rtf)$/.test(n)) return 'word';
-  if (/\.(xlsx?|xlsm)$/.test(n)) return 'excel';
-  if (/\.(pptx?|ppsx?)$/.test(n)) return 'ppt';
+  // 含 OpenDocument 格式（LibreOffice / WPS 另存的 .odt .ods .odp），微软查看器也能打开
+  if (/\.(docx?|docm|rtf|odt)$/.test(n)) return 'word';
+  if (/\.(xlsx?|xlsm|xlsb|ods)$/.test(n)) return 'excel';
+  if (/\.(pptx?|ppsx?|odp)$/.test(n)) return 'ppt';
+  // WPS 自有格式微软打不开，提示转存
+  if (/\.(wps|et|dps)$/.test(n)) return 'wps';
   return '';
 }
-const icon = k => ({ image: '🖼️', video: '🎬', audio: '🎵', pdf: '📕', text: '📝', word: '📘', excel: '📗', ppt: '📙' }[k] || '📄');
+const icon = k => ({ image: '🖼️', video: '🎬', audio: '🎵', pdf: '📕', text: '📝', word: '📘', excel: '📗', ppt: '📙', wps: '📄' }[k] || '📄');
 const isOffice = k => k === 'word' || k === 'excel' || k === 'ppt';
 // Office 文件用微软在线查看器打开：它需要能从公网访问的文件地址，文件会被微软服务器读取
 const OFFICE_LIMIT = { word: 10, ppt: 10, excel: 5 };   // MB，超过微软查看器会打不开
 function preview(f) {
   const src = `/api/files/${encodeURIComponent(f.id)}?view=1`, k = kind(f);
-  const officeSrc = 'https://view.officeapps.live.com/op/embed.aspx?src=' +
-    encodeURIComponent(location.origin + `/api/files/${encodeURIComponent(f.id)}`);
+  const fileUrl = encodeURIComponent(location.origin + `/api/files/${encodeURIComponent(f.id)}`);
+  const officeSrc = 'https://view.officeapps.live.com/op/embed.aspx?src=' + fileUrl;
   const tooBig = isOffice(k) && (f.size || 0) > OFFICE_LIMIT[k] * 1048576;
-  const el = isOffice(k)
+  const el = k === 'wps'
+    ? `<div style="padding:40px;text-align:center;color:#ccc;line-height:2">WPS 专有格式（.wps / .et / .dps）没有可用的在线查看器。<br>
+        请在 WPS 里“另存为” .docx / .xlsx / .pptx 再上传，或直接下载查看。</div>`
+    : isOffice(k)
     ? (tooBig ? `<div style="padding:40px;text-align:center;color:#999">文件超过 ${OFFICE_LIMIT[k]}MB，微软在线查看器打不开，请下载后查看</div>`
               : `<iframe src="${officeSrc}" style="background:#fff"></iframe>`)
     : k === 'image' ? `<img src="${src}" alt="">`
@@ -153,13 +172,25 @@ function preview(f) {
   $('pvBody').innerHTML = el;
   $('pvName').textContent = f.name;
   $('pvDl').href = `/api/files/${encodeURIComponent(f.id)}`;
+  // 新窗口：Office 用微软的完整查看页，其余直接打开文件
+  $('pvNew').href = isOffice(k) ? 'https://view.officeapps.live.com/op/view.aspx?src=' + fileUrl : src;
+  $('pvNew').hidden = k === 'wps';
   $('pv').hidden = false;
   const v = $('pvBody').querySelector('video');
   if (v) v.onerror = () => { $('pvName').textContent = f.name + '（此设备可能不支持该视频格式，请下载后观看）'; };
 }
-function closePv() { $('pv').hidden = true; $('pvBody').innerHTML = ''; }
+function closePv() {
+  if (document.fullscreenElement) document.exitFullscreen().catch(() => {});
+  $('pv').hidden = true; $('pvBody').innerHTML = '';
+}
 $('pvClose').onclick = closePv;
-$('pv').onclick = e => { if (e.target.id === 'pv') closePv(); };
+$('pv').onclick = e => { if (e.target.id === 'pv' || e.target.id === 'pvBody') closePv(); };
+// 全屏：整个预览层全屏（视频/图片/文档都撑满屏幕）
+$('pvFull').onclick = () => {
+  if (document.fullscreenElement) document.exitFullscreen();
+  else ($('pv').requestFullscreen || $('pv').webkitRequestFullscreen).call($('pv'));
+};
+document.addEventListener('fullscreenchange', () => { $('pvFull').textContent = document.fullscreenElement ? '⛶ 退出全屏' : '⛶ 全屏'; });
 document.addEventListener('keydown', e => { if (e.key === 'Escape' && !$('pv').hidden) closePv(); });
 
 // ---------- 文件夹 ----------
@@ -185,12 +216,19 @@ async function loadDirs() {
   try {
     const list = await api('/api/folders');
     $('dirs').innerHTML = list.map(d => `
-      <div class="dir" data-name="${esc(d.name)}">
+      <div class="dir ${d.hidden ? 'is-hidden' : ''}" data-name="${esc(d.name)}">
         <button class="ddel" title="删除空文件夹" data-name="${esc(d.name)}">✕</button>
+        <button class="dhide adm" title="${d.hidden ? '取消隐藏这个文件夹' : '隐藏整个文件夹'}" data-name="${esc(d.name)}" data-h="${d.hidden ? 1 : 0}">${d.hidden ? '🙈' : '👁'}</button>
         <div class="dn">${DIR_SVG}<span>${esc(d.name)}</span></div>
-        <small>${d.count} 个文件${d.count ? ' · ' + fmtS(d.size) : ''}</small>
+        <small>${d.count} 个文件${d.count ? ' · ' + fmtS(d.size) : ''}${d.hidden ? '<span class="hid">已隐藏</span>' : ''}</small>
       </div>`).join('');
     $('dirs').querySelectorAll('.dir').forEach(el => el.onclick = () => goDir(el.dataset.name));
+    $('dirs').querySelectorAll('.dhide').forEach(b => b.onclick = async e => {
+      e.stopPropagation();
+      const hide = b.dataset.h !== '1';
+      if (hide && !confirm(`隐藏文件夹「${b.dataset.name}」？\n访客将看不到它，里面的文件也无法下载（包括别处引用的链接）。`)) return;
+      try { await setHidden({ folder: b.dataset.name }, hide); loadDirs(); } catch (err) { alert(err.message); }
+    });
     $('dirs').querySelectorAll('.ddel').forEach(b => b.onclick = async e => {
       e.stopPropagation();
       if (!confirm(`删除文件夹「${b.dataset.name}」？`)) return;
@@ -207,18 +245,27 @@ $('newDir').onclick = async () => {
   catch (e) { alert(e.message); }
 };
 
+// 隐藏 / 取消隐藏：target = {id} 或 {folder}
+const setHidden = (target, hidden) => api('/api/hide', { method: 'POST',
+  headers: { 'content-type': 'application/json' }, body: JSON.stringify({ ...target, hidden }) });
+
 async function loadFiles() {
   const d = curDir();
   try {
     const list = await api('/api/files?folder=' + encodeURIComponent(d));
     const head = !d && list.length ? '<div class="sub">未归类的文件</div>' : '';
     $('files').innerHTML = list.length ? head + list.map(f => `
-      <div class="file">${icon(kind(f))} <a href="/api/files/${esc(encodeURIComponent(f.id))}" download>${esc(f.name)}</a>
+      <div class="file ${f.hidden ? 'is-hidden' : ''}">${icon(kind(f))} <a href="/api/files/${esc(encodeURIComponent(f.id))}" download>${esc(f.name)}</a>
+        ${f.hidden ? '<span class="hid">🙈 已隐藏</span>' : ''}
         <small>${fmtS(f.size || 0)} · ${fmtT(f.time)}</small>
+        <button class="hbtn adm" data-id="${esc(f.id)}" data-h="${f.hidden ? 1 : 0}">${f.hidden ? '取消隐藏' : '隐藏'}</button>
         ${kind(f) ? `<button class="view" data-id="${esc(f.id)}">${kind(f) === 'video' || kind(f) === 'audio' ? '播放' : '查看'}</button>` : ''}
         <button class="del" data-id="${esc(f.id)}">删除</button></div>`).join('')
       : (d ? '<div class="empty">这个文件夹还是空的，把文件拖到上面的框里上传</div>' : '');
     $('files').querySelectorAll('.view').forEach(b => b.onclick = () => preview(list.find(f => f.id === b.dataset.id)));
+    $('files').querySelectorAll('.hbtn').forEach(b => b.onclick = async () => {
+      try { await setHidden({ id: b.dataset.id }, b.dataset.h !== '1'); loadFiles(); } catch (e) { alert(e.message); }
+    });
     $('files').querySelectorAll('.del').forEach(b => b.onclick = async () => {
       if (!confirm('删除这个文件？')) return;
       try { await api('/api/files/' + encodeURIComponent(b.dataset.id), { method: 'DELETE' }); reload(); }
@@ -268,7 +315,7 @@ const CHUNK = 20 * 1024 * 1024;
 async function uploadBig(f, folder, label) {
   const json = obj => ({ method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(obj) });
   const s = await api('/api/upload/start', json({ name: f.name, type: f.type, size: f.size, folder }));
-  const q = `id=${s.id}&uploadId=${encodeURIComponent(s.uploadId)}`;
+  const q = `id=${encodeURIComponent(s.id)}&uploadId=${encodeURIComponent(s.uploadId)}`;
   const total = Math.ceil(f.size / CHUNK), parts = [], t0 = Date.now();
   try {
     for (let i = 0; i < total; i++) {
@@ -283,7 +330,7 @@ async function uploadBig(f, folder, label) {
       }
     }
     $('status').textContent = `${label}${f.name}：正在合并文件…`;
-    await api('/api/upload/complete?' + q, json({ parts, folder }));
+    await api('/api/upload/complete?' + q, json({ parts, folder, hidden: $('hideChk').checked }));
   } catch (e) {
     api('/api/upload/abort?' + q, { method: 'POST' }).catch(() => {});
     throw e;
@@ -310,6 +357,7 @@ async function upload(items) {
     }
     $('status').textContent = `${label}${f.name} …`;
     const fd = new FormData(); fd.append('file', f); fd.append('folder', folder);
+    if (adminKey && $('hideChk').checked) fd.append('hidden', '1');
     const t0 = Date.now();
     try { await xhrSend('POST', '/api/files', fd, loaded => showProg(label, f.name, Math.min(loaded, f.size), f.size, t0)); ok++; }
     catch (e) { $('status').textContent = `✘ ${f.name}：${e.message}`; }
