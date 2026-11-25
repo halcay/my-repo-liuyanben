@@ -16,6 +16,13 @@
   "r2_buckets": [
     { "binding": "R2", "bucket_name": "board-files" }
   ],
+  // 实时聊天室：每个房间一个 Durable Object（SQLite 版，免费套餐可用），部署时自动创建
+  "durable_objects": {
+    "bindings": [{ "name": "CHAT", "class_name": "ChatRoom" }]
+  },
+  "migrations": [
+    { "tag": "v1", "new_sqlite_classes": ["ChatRoom"] }
+  ],
   "observability": { "enabled": true },
   // 部署时保留在 Cloudflare 后台手动添加的变量，不被这份配置清掉
   "keep_vars": true
