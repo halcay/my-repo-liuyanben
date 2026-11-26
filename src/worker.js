@@ -154,6 +154,8 @@ export default {
   async fetch(req, env) {
     const url = new URL(req.url);
     const p = url.pathname;
+    // 纯图文页面的好看地址：/p/<地址> → 显示 page.html（页面自己从网址里读出地址）
+    if (/^\/p\/[^/]+\/?$/.test(p)) return env.ASSETS.fetch(new Request(new URL('/page', url), req));
     if (!p.startsWith('/api/')) return env.ASSETS.fetch(req);
 
     // ---------- 实时聊天：/api/chat/<房间名> 升级为 WebSocket，交给该房间的 Durable Object ----------
@@ -178,20 +180,28 @@ export default {
       // ---------- 博客文章 ----------
       // KV 键 post:<slug>，值 = {title, content(Markdown), tags, draft, time, updated}
       // metadata 存列表要用的字段（≤1KB），列表不用逐篇读正文
-      if (p === '/api/posts' && req.method === 'GET') {
+      // ---------- 博客文章（posts）和 纯图文页面（pages）共用一套接口 ----------
+      // 页面 KV 键 page:<slug>；没有标签、列表只给管理员看，访问地址 /p/<slug>
+      const pc = p.match(/^\/api\/(posts|pages)(?:\/(.+))?$/);
+      const isPage = pc && pc[1] === 'pages';
+      const PFX = isPage ? 'page:' : 'post:';
+      const NOUN = isPage ? '页面' : '文章';
+      if (pc && !pc[2] && req.method === 'GET') {
         const admin = isAdmin(req, env);
-        const keys = await listAll(env.KV, 'post:', 1000);
-        const posts = keys.map(k => ({ slug: k.name.slice(5), ...(k.metadata || {}) }))
+        // 页面列表只给管理员（页面是单独分享链接用的，不对外列出）
+        if (isPage && !admin) return json([]);
+        const keys = await listAll(env.KV, PFX, 1000);
+        const posts = keys.map(k => ({ slug: k.name.slice(PFX.length), ...(k.metadata || {}) }))
           .filter(x => admin || !x.draft)
           .sort((a, b) => (b.time || 0) - (a.time || 0));
         return json(posts);
       }
-      const pm = p.match(/^\/api\/posts\/(.+)$/);
+      const pm = pc && pc[2] ? pc : null;
       if (pm) {
-        let slug; try { slug = decodeURIComponent(pm[1]); } catch (e) { return json({ error: '地址错误' }, 400); }
+        let slug; try { slug = decodeURIComponent(pm[2]); } catch (e) { return json({ error: '地址错误' }, 400); }
         if (req.method === 'GET') {
-          const post = await env.KV.get('post:' + slug, 'json');
-          if (!post || (post.draft && !isAdmin(req, env))) return json({ error: '文章不存在' }, 404);
+          const post = await env.KV.get(PFX + slug, 'json');
+          if (!post || (post.draft && !isAdmin(req, env))) return json({ error: NOUN + '不存在' }, 404);
           return json({ slug, ...post });
         }
         if (!isAdmin(req, env)) return json({ error: '管理密钥错误' }, 403);
@@ -203,22 +213,23 @@ export default {
           if (content.length > 500000) return json({ error: '正文太长（上限约 50 万字）' }, 413);
           // 文章地址只允许字母数字中文和 - _
           const newSlug = String(b.slug || slug).trim().replace(/[^\w一-龥-]+/g, '-').replace(/^-+|-+$/g, '').slice(0, 80);
-          if (!newSlug) return json({ error: '文章地址不能为空' }, 400);
-          const old = await env.KV.get('post:' + slug, 'json');
-          if (newSlug !== slug && await env.KV.get('post:' + newSlug)) return json({ error: '这个文章地址已被占用' }, 409);
-          const tags = (Array.isArray(b.tags) ? b.tags : String(b.tags || '').split(/[,，\s]+/))
+          if (!newSlug) return json({ error: NOUN + '地址不能为空' }, 400);
+          const old = await env.KV.get(PFX + slug, 'json');
+          if (newSlug !== slug && await env.KV.get(PFX + newSlug)) return json({ error: '这个地址已被占用' }, 409);
+          const tags = isPage ? [] : (Array.isArray(b.tags) ? b.tags : String(b.tags || '').split(/[,，\s]+/))
             .map(t => String(t).trim().slice(0, 20)).filter(Boolean).slice(0, 10);
           const now = Date.now();
           const post = { title, content, tags, draft: !!b.draft, time: old?.time || now, updated: now };
+          if (isPage) post.hideTitle = !!b.hideTitle;   // 页面可以不显示标题，纯正文
           // 摘要：去掉 Markdown 符号取前 120 字
           const summary = content.replace(/!\[[^\]]*\]\([^)]*\)/g, '').replace(/[#>*`_\-\[\]()|]/g, '').replace(/\s+/g, ' ').trim().slice(0, 120);
           const meta = { title, summary, tags, draft: post.draft, time: post.time, updated: now };
-          await env.KV.put('post:' + newSlug, JSON.stringify(post), { metadata: meta });
-          if (old && newSlug !== slug) await env.KV.delete('post:' + slug);
+          await env.KV.put(PFX + newSlug, JSON.stringify(post), { metadata: meta });
+          if (old && newSlug !== slug) await env.KV.delete(PFX + slug);
           return json({ ok: true, slug: newSlug });
         }
         if (req.method === 'DELETE') {
-          await env.KV.delete('post:' + slug);
+          await env.KV.delete(PFX + slug);
           return json({ ok: true });
         }
       }
@@ -243,6 +254,23 @@ export default {
         if (!isAdmin(req, env)) return json({ error: '管理密钥错误' }, 403);
         await env.KV.delete(decodeURIComponent(p.slice('/api/messages/'.length)));
         return json({ ok: true });
+      }
+      // 管理员修改留言：可改昵称、内容、是否悄悄话；保留原发布时间，标记“已编辑”
+      if (p.startsWith('/api/messages/') && req.method === 'PUT') {
+        if (!isAdmin(req, env)) return json({ error: '管理密钥错误' }, 403);
+        const key = decodeURIComponent(p.slice('/api/messages/'.length));
+        if (!key.startsWith('msg:')) return json({ error: '参数错误' }, 400);
+        const old = await env.KV.get(key, 'json');
+        if (!old) return json({ error: '留言不存在' }, 404);
+        const b = await req.json().catch(() => ({}));
+        const text = b.text != null ? String(b.text).trim().slice(0, MAX_MSG) : old.text;
+        if (!text) return json({ error: '内容不能为空' }, 400);
+        const msg = { ...old, text,
+          name: b.name != null ? (String(b.name).trim().slice(0, 30) || '匿名') : old.name,
+          private: b.private != null ? !!b.private : !!old.private,
+          edited: Date.now() };
+        await env.KV.put(key, JSON.stringify(msg));
+        return json({ ok: true, id: key, ...msg });
       }
 
       // ---------- 文件 ----------

@@ -1,0 +1,122 @@
+<!doctype html>
+<html lang="zh">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title></title>
+<meta name="robots" content="noindex">
+<style>
+  :root{--bg:#fff;--fg:#1f2328;--mute:#6b7280;--line:#e5e7eb;--pri:#2563eb;--code:#f4f4f2}
+  @media (prefers-color-scheme:dark){:root{--bg:#141414;--fg:#e6e6e6;--mute:#9a9a9a;--line:#2c2c2c;--pri:#60a5fa;--code:#222}}
+  *{box-sizing:border-box}
+  body{margin:0;background:var(--bg);color:var(--fg);font-family:-apple-system,"PingFang SC","Microsoft YaHei",sans-serif;line-height:1.8}
+  .wrap{max-width:760px;margin:0 auto;padding:36px 18px 60px}
+  h1.title{font-size:30px;line-height:1.35;margin:0 0 24px}
+  .body{font-size:17px;word-wrap:break-word}
+  .body img,.body video{max-width:100%;height:auto;border-radius:6px;display:block;margin:14px auto}
+  .body audio{width:100%}
+  .body pre{background:var(--code);padding:14px;border-radius:8px;overflow:auto;line-height:1.5}
+  .body code{background:var(--code);padding:1px 5px;border-radius:4px;font-size:.92em}
+  .body pre code{background:none;padding:0}
+  .body blockquote{margin:0;padding:2px 16px;border-left:4px solid var(--line);color:var(--mute)}
+  .body table{border-collapse:collapse;display:block;overflow:auto}
+  .body th,.body td{border:1px solid var(--line);padding:6px 10px}
+  .body a{color:var(--pri)}
+  .empty{color:var(--mute);text-align:center;padding:80px 0}
+  /* 管理员才有的浮动按钮，访客完全看不到 */
+  #admBar{position:fixed;right:14px;bottom:14px;display:none;gap:8px}
+  #admBar a,#admBar button{padding:7px 14px;border-radius:8px;border:1px solid var(--line);background:var(--bg);color:var(--fg);font-size:13px;cursor:pointer;text-decoration:none;box-shadow:0 2px 8px #0002}
+  body.admin #admBar{display:flex}
+  /* 管理列表 */
+  .list h2{font-size:22px;margin:0 0 6px;display:flex;align-items:center}
+  .list h2 a{margin-left:auto;font-size:14px;font-weight:400;color:#fff;background:var(--pri);padding:6px 14px;border-radius:8px;text-decoration:none}
+  .list p.tip{color:var(--mute);font-size:13.5px;margin:0 0 16px}
+  .row{display:flex;gap:10px;align-items:center;padding:12px 0;border-bottom:1px solid var(--line);flex-wrap:wrap}
+  .row .t{flex:1;min-width:180px}
+  .row .t a{color:var(--fg);text-decoration:none;font-weight:600}
+  .row small{color:var(--mute);display:block;font-size:12.5px}
+  .row button,.row .lk{border:0;background:none;color:var(--pri);cursor:pointer;font-size:13.5px;text-decoration:none;padding:0}
+  .row .del{color:#dc2626}
+  .draft{font-size:12px;color:#b45309;border:1px solid #b45309;border-radius:4px;padding:0 6px;margin-left:6px;font-weight:400}
+</style>
+</head>
+<body>
+<div class="wrap" id="main"><div class="empty">加载中…</div></div>
+<div id="admBar"></div>
+
+<script src="https://cdnjs.cloudflare.com/ajax/libs/marked/12.0.2/marked.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/dompurify/3.1.6/purify.min.js"></script>
+<script>
+const $ = id => document.getElementById(id);
+const esc = s => String(s ?? '').replace(/[&<>"]/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));
+let adminKey = ''; try { adminKey = sessionStorage.getItem('adminKey') || ''; } catch (e) {}
+if (adminKey) document.body.classList.add('admin');
+async function api(path, opt = {}) {
+  opt.headers = { ...(opt.headers || {}), ...(adminKey ? { 'x-admin-key': adminKey } : {}) };
+  const r = await fetch(path, opt);
+  const j = await r.json().catch(() => ({ error: r.status + ' ' + r.statusText }));
+  if (!r.ok) throw new Error(j.error || r.status);
+  return j;
+}
+const md = s => window.marked && window.DOMPurify
+  ? DOMPurify.sanitize(marked.parse(s), { ADD_TAGS: ['video', 'audio', 'source'], ADD_ATTR: ['controls', 'playsinline'] })
+  : '<pre>' + esc(s) + '</pre>';
+const pageUrl = slug => location.origin + '/p/' + encodeURIComponent(slug);
+
+// 地址：/p/<slug>，或 page.html?p=<slug>
+const m = location.pathname.match(/^\/p\/([^/]+)/);
+let slug = ''; try { slug = m ? decodeURIComponent(m[1]) : (new URLSearchParams(location.search).get('p') || ''); } catch (e) {}
+
+// ---------- 访客看到的：只有正文 ----------
+async function showPage() {
+  try {
+    const pg = await api('/api/pages/' + encodeURIComponent(slug));
+    document.title = pg.title;
+    $('main').innerHTML = (pg.hideTitle ? '' : `<h1 class="title">${esc(pg.title)}${pg.draft ? '<span class="draft">草稿</span>' : ''}</h1>`) +
+      `<div class="body">${md(pg.content)}</div>`;
+    $('admBar').innerHTML = `<a href="/docs/edit.html?type=page&p=${encodeURIComponent(slug)}">编辑</a><a href="/page.html">全部页面</a>`;
+  } catch (e) {
+    document.title = '页面不存在';
+    $('main').innerHTML = '<div class="empty">页面不存在</div>';
+  }
+}
+
+// ---------- 管理员：页面列表 ----------
+async function showList() {
+  document.title = '页面管理';
+  if (!adminKey) {
+    const k = prompt('管理页面需要管理密钥');
+    if (!k) { $('main').innerHTML = '<div class="empty">页面不存在</div>'; return; }
+    adminKey = k;
+    try { await api('/api/admin'); sessionStorage.setItem('adminKey', k); document.body.classList.add('admin'); }
+    catch (e) { adminKey = ''; $('main').innerHTML = `<div class="empty">${esc(e.message)}</div>`; return; }
+  }
+  try {
+    const list = await api('/api/pages');
+    $('main').innerHTML = `<div class="list">
+      <h2>页面管理 <a href="/docs/edit.html?type=page">＋ 新建页面</a></h2>
+      <p class="tip">纯图文页面：没有日期、标签和站点导航，不出现在博客和首页，只有拿到链接的人能看到。</p>
+      ${list.length ? list.map(pg => `<div class="row">
+        <div class="t"><a href="/p/${encodeURIComponent(pg.slug)}">${esc(pg.title)}</a>${pg.draft ? '<span class="draft">草稿</span>' : ''}
+          <small>/p/${esc(pg.slug)}</small></div>
+        <button data-copy="${esc(pg.slug)}">复制链接</button>
+        <a class="lk" href="/docs/edit.html?type=page&p=${encodeURIComponent(pg.slug)}">编辑</a>
+        <button class="del" data-del="${esc(pg.slug)}" data-title="${esc(pg.title)}">删除</button></div>`).join('')
+        : '<div class="empty">还没有页面，点右上角新建一个</div>'}</div>`;
+    $('main').querySelectorAll('[data-copy]').forEach(b => b.onclick = async () => {
+      const u = pageUrl(b.dataset.copy);
+      try { await navigator.clipboard.writeText(u); b.textContent = '已复制 ✓'; setTimeout(() => b.textContent = '复制链接', 1500); }
+      catch (e) { prompt('复制链接：', u); }
+    });
+    $('main').querySelectorAll('[data-del]').forEach(b => b.onclick = async () => {
+      if (!confirm(`删除页面「${b.dataset.title}」？无法恢复`)) return;
+      try { await api('/api/pages/' + encodeURIComponent(b.dataset.del), { method: 'DELETE' }); showList(); }
+      catch (e) { alert(e.message); }
+    });
+  } catch (e) { $('main').innerHTML = `<div class="empty">${esc(e.message)}</div>`; }
+}
+
+slug ? showPage() : showList();
+</script>
+</body>
+</html>

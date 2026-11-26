@@ -103,10 +103,36 @@ async function loadMsgs() {
   try {
     const list = await api('/api/messages');
     $('msgs').innerHTML = list.length ? list.map(m => `
-      <div class="msg"><b>${esc(m.name)}</b><small>${fmtT(m.time)}${m.private ? ' · 🔒悄悄话' : ''}</small>
+      <div class="msg" data-id="${esc(m.id)}"><b>${esc(m.name)}</b><small>${fmtT(m.time)}${m.private ? ' · 🔒悄悄话' : ''}${m.edited ? ' · 已编辑' : ''}</small>
+        <button class="del edt" data-id="${esc(m.id)}" style="color:var(--pri)">编辑</button>
         <button class="del" data-id="${esc(m.id)}">删除</button><p>${esc(m.text)}</p></div>`).join('')
       : '<div class="empty">还没有留言，来写第一条吧</div>';
-    $('msgs').querySelectorAll('.del').forEach(b => b.onclick = async () => {
+    // 管理员编辑：原地变成输入框，可改昵称、内容、是否悄悄话
+    $('msgs').querySelectorAll('.edt').forEach(b => b.onclick = () => {
+      const m = list.find(x => x.id === b.dataset.id), box = b.closest('.msg');
+      box.innerHTML = `
+        <input class="e-name" maxlength="30" style="max-width:200px;margin-bottom:6px">
+        <textarea class="e-text" maxlength="1000" style="min-height:80px"></textarea>
+        <div style="display:flex;gap:10px;align-items:center;margin-top:6px;flex-wrap:wrap">
+          <button class="btn e-save" style="padding:6px 16px;font-size:14px">保存</button>
+          <button class="e-cancel" style="border:0;background:none;color:var(--mute);cursor:pointer">取消</button>
+          <label style="font-size:13px;color:var(--mute)"><input type="checkbox" class="e-priv" style="width:auto"> 悄悄话</label>
+        </div>`;
+      box.querySelector('.e-name').value = m.name;
+      box.querySelector('.e-text').value = m.text;
+      box.querySelector('.e-priv').checked = !!m.private;
+      box.querySelector('.e-text').focus();
+      box.querySelector('.e-cancel').onclick = loadMsgs;
+      box.querySelector('.e-save').onclick = async () => {
+        try {
+          await api('/api/messages/' + encodeURIComponent(m.id), { method: 'PUT', headers: { 'content-type': 'application/json' },
+            body: JSON.stringify({ name: box.querySelector('.e-name').value, text: box.querySelector('.e-text').value,
+              private: box.querySelector('.e-priv').checked }) });
+          loadMsgs();
+        } catch (e) { alert('保存失败：' + e.message); }
+      };
+    });
+    $('msgs').querySelectorAll('.del:not(.edt)').forEach(b => b.onclick = async () => {
       if (!confirm('删除这条留言？')) return;
       try { await api('/api/messages/' + encodeURIComponent(b.dataset.id), { method: 'DELETE' }); loadMsgs(); }
       catch (e) { alert(e.message); }

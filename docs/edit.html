@@ -36,7 +36,7 @@
 </head>
 <body>
 <div class="bar">
-  <a href="/docs/">← 博客</a>
+  <a href="/docs/" id="backLink">← 博客</a>
   <span id="st"></span>
   <span class="sp"></span>
   <label style="font-size:14px;display:flex;gap:4px;align-items:center"><input id="draft" type="checkbox" style="width:auto"> 草稿（不公开）</label>
@@ -48,6 +48,8 @@
   <input id="title" placeholder="标题">
   <input id="slug" placeholder="文章地址（可空，自动生成）">
   <input id="tags" placeholder="标签，用逗号分隔">
+  <label id="hideTitleBox" hidden style="font-size:14px;display:flex;gap:6px;align-items:center;color:var(--mute)">
+    <input id="hideTitle" type="checkbox" style="width:auto"> 页面上不显示标题（标题只用作浏览器标签名）</label>
 </div>
 
 <div class="edit">
@@ -73,7 +75,17 @@ const $ = id => document.getElementById(id);
 const st = t => $('st').textContent = t;
 let adminKey = ''; try { adminKey = sessionStorage.getItem('adminKey') || ''; } catch (e) {}
 const editing = new URLSearchParams(location.search).get('p');   // 编辑已有文章时的地址
-const DRAFT_KEY = 'blogDraft:' + (editing || '_new');
+// ?type=page：编辑“纯图文页面”（没有日期、标签、文章列表，发布到 /p/地址）
+const PAGE = new URLSearchParams(location.search).get('type') === 'page';
+const API = PAGE ? '/api/pages/' : '/api/posts/';
+const BACK = PAGE ? '/page.html' : '/docs/';
+const viewUrl = slug => PAGE ? '/p/' + encodeURIComponent(slug) : '/docs/?p=' + encodeURIComponent(slug);
+const DRAFT_KEY = (PAGE ? 'pageDraft:' : 'blogDraft:') + (editing || '_new');
+if (PAGE) {
+  $('tags').hidden = true; $('hideTitleBox').hidden = false;
+  $('backLink').href = BACK; $('backLink').textContent = '← 页面管理';
+  $('slug').placeholder = '页面地址（可空），例如 intro → 网址 /p/intro';
+}
 
 async function api(path, opt = {}) {
   opt.headers = { ...(opt.headers || {}), ...(adminKey ? { 'x-admin-key': adminKey } : {}) };
@@ -87,7 +99,7 @@ async function api(path, opt = {}) {
 async function ensureAdmin() {
   while (true) {
     if (adminKey) { try { await api('/api/admin'); return true; } catch (e) { alert(e.message); } }
-    const k = prompt('写文章需要管理密钥'); if (!k) { location.href = '/docs/'; return false; }
+    const k = prompt('需要管理密钥'); if (!k) { location.href = BACK; return false; }
     adminKey = k;
     try { await api('/api/admin'); sessionStorage.setItem('adminKey', k); return true; } catch (e) { alert(e.message); adminKey = ''; }
   }
@@ -161,7 +173,7 @@ $('content').addEventListener('drop', e => {
 // ---------- 保存 ----------
 function collect() {
   return { title: $('title').value.trim(), slug: $('slug').value.trim(), tags: $('tags').value,
-    content: $('content').value, draft: $('draft').checked };
+    content: $('content').value, draft: $('draft').checked, hideTitle: $('hideTitle').checked };
 }
 async function save() {
   const d = collect();
@@ -170,12 +182,12 @@ async function save() {
   const slug = editing || d.slug || new Date().toISOString().slice(0, 10) + '-' + Math.random().toString(36).slice(2, 6);
   $('saveBtn').disabled = true; st('保存中…');
   try {
-    const r = await api('/api/posts/' + encodeURIComponent(slug), { method: 'PUT',
+    const r = await api(API + encodeURIComponent(slug), { method: 'PUT',
       headers: { 'content-type': 'application/json' }, body: JSON.stringify({ ...d, slug: d.slug || slug }) });
     dirty = false;
     try { localStorage.removeItem(DRAFT_KEY); } catch (e) {}
     st('✔ 已保存');
-    location.href = '/docs/?p=' + encodeURIComponent(r.slug);
+    location.href = viewUrl(r.slug);
   } catch (e) { st('✘ ' + e.message); alert('保存失败：' + e.message); }
   $('saveBtn').disabled = false;
 }
@@ -189,14 +201,15 @@ $('draft').onchange = () => { $('saveBtn').firstChild.textContent = $('draft').c
   let local = null; try { local = JSON.parse(localStorage.getItem(DRAFT_KEY) || 'null'); } catch (e) {}
   let d = null;
   if (editing) {
-    try { const p = await api('/api/posts/' + encodeURIComponent(editing));
-      d = { title: p.title, slug: editing, tags: (p.tags || []).join(', '), content: p.content, draft: !!p.draft }; }
+    try { const p = await api(API + encodeURIComponent(editing));
+      d = { title: p.title, slug: editing, tags: (p.tags || []).join(', '), content: p.content, draft: !!p.draft, hideTitle: !!p.hideTitle }; }
     catch (e) { alert('读取文章失败：' + e.message); }
     $('slug').value = editing;
   }
   if (local && local.content && local.content !== d?.content && confirm('发现上次没保存的内容，要恢复吗？')) d = local;
   if (d) { $('title').value = d.title || ''; if (d.slug) $('slug').value = d.slug; $('tags').value = d.tags || ''; $('content').value = d.content || ''; $('draft').checked = !!d.draft; }
-  document.title = editing ? '编辑：' + ($('title').value || editing) : '写文章';
+  if (d) $('hideTitle').checked = !!d.hideTitle;
+  document.title = (editing ? '编辑：' + ($('title').value || editing) : PAGE ? '新建页面' : '写文章');
   $('draft').onchange();
   dirty = false;
   $('preview').innerHTML = md($('content').value);

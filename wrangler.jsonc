@@ -5,7 +5,7 @@
   "assets": {
     "directory": ".",
     "binding": "ASSETS",
-    "run_worker_first": ["/api/*"]
+    "run_worker_first": ["/api/*", "/p/*"]
   },
   "kv_namespaces": [
     // 在 Cloudflare 后台 存储和数据库 → Workers KV 新建命名空间，把 ID 填到这里
